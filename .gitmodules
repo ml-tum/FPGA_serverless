@@ -4,3 +4,6 @@
 [submodule "funky-unikernel"]
 	path = funky-unikernel
 	url = git@github.com:TUM-DSE/funky-unikernel.git
+[submodule "kata_urunc"]
+	path = kata_urunc
+	url = git@github.com:TUM-DSE/FPGA-uruntime.git
