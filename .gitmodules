@@ -7,3 +7,6 @@
 [submodule "kata_urunc"]
 	path = kata_urunc
 	url = git@github.com:TUM-DSE/FPGA-uruntime.git
+[submodule "fpga-kubernetes"]
+	path = fpga-kubernetes
+	url = https://github.com/TUM-DSE/fpga-kubernetes/
