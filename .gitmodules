@@ -10,3 +10,7 @@
 [submodule "fpga-kubernetes"]
 	path = fpga-kubernetes
 	url = https://github.com/TUM-DSE/fpga-kubernetes/
+[submodule "Coyote"]
+	path = Coyote
+	url = git@github.com:TUM-DSE/Coyote.git
+	branch = serverless-fpga
