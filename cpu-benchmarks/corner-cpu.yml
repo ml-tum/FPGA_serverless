@@ -1,0 +1,10 @@
+version: 1.0
+provider:
+  name: openfaas
+  gateway: http://127.0.0.1:8080
+functions:
+  corner-cpu:
+    lang: dockerfile
+    handler: ./corner-cpu
+    image: docker.io/ccgroup47/myrepo:corner-cpu
+

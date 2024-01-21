@@ -1,0 +1,11 @@
+version: 1.0
+provider:
+  name: openfaas
+  gateway: http://127.0.0.1:8080
+functions:
+  sha3-cpu:
+    lang: dockerfile
+    handler: ./sha3-cpu
+#    image: sha3-cpu
+    image: docker.io/ccgroup47/myrepo:sha3-cpu
+

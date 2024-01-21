@@ -1,0 +1,7 @@
+numpy
+tensorflow
+scikit-learn
+hls4ml
+qkeras
+pyparsing
+
