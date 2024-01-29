@@ -1,2 +1,4 @@
 AzureFunctionsInvocationTraceForTwoWeeksJan2021*
 .DS_Store
+__pycache__
+resampled.csv

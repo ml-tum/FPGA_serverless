@@ -1,2 +1,4 @@
 traces_invocation_frequency_distribution.png
 traces_request_duration.png
+concurrency_histogram_*.png
+.DS_Store

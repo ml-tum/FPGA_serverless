@@ -5,4 +5,6 @@ simulator.run_on_file(
     NUM_NODES=40,
     FUNCTION_KEEPALIVE=None,
     FPGA_RECONFIGURATION_TIME=0.3,
+    ENABLE_LOGS=True,
+    ENABLE_PROGRESS_LOGS=True,
 )
