@@ -2,6 +2,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include "../util/util.h"
 using namespace cv;
 using namespace std;
 
@@ -30,11 +31,13 @@ int main()
     int apertureSize = 3;
     double k = 0.04;
     Mat dst = Mat::zeros( img.size(), CV_32FC1 );
-    cornerHarris( img, dst, blockSize, apertureSize, k );
-
-    Mat dst_norm;
+    Mat dst_norm = Mat::zeros( img.size(), CV_32FC1 );
+    
+    measure_start();
+    cornerHarris( img, dst, blockSize, apertureSize, k );   
     normalize( dst, dst_norm, 0, 255, NORM_MINMAX, CV_32FC1, Mat() );
-
+    measure_end();
+    
     for( int i = 0; i < dst_norm.rows ; i++ ) {
         for( int j = 0; j < dst_norm.cols; j++ ) {
             if(dst_norm.at<float>(i,j) >= THRESHOLD) {
@@ -42,6 +45,8 @@ int main()
             }
         }
     }
+    
+    measure_write("corner", "cpu", 1080*1920*1);
 
     return 0;
 }

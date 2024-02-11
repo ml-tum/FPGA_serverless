@@ -1,5 +1,7 @@
 #include <iostream>
 #include <vector>
+#include "../util/util.h"
+
 using namespace std;
 
 int main() {
@@ -16,9 +18,17 @@ int main() {
 
 	uint32_t mul = vec[0];
 	uint32_t add = vec[1];
+	measure_start();
 	for(size_t i=2; i<vec.size(); i++) {
-		cout<<((vec[i]<<mul)+add)<<endl;
+		vec[i] = ((vec[i]<<mul)+add);
 	}
+	measure_end();
+	
+	for(size_t i=2; i<vec.size(); i++) {
+		cout<<vec[i]<<endl;
+	}
+	
+	measure_write("addmul", "cpu", (-2+(int)vec.size())*sizeof(uint32_t));
 
 	return 0;
 }

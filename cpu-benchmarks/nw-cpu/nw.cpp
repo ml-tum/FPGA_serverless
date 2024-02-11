@@ -2,6 +2,7 @@
 #include <thread>
 #include <sstream>
 #include <array>
+#include "../util/util.h"
 using namespace std;
 
 using uint128_t = unsigned __int128;
@@ -30,11 +31,11 @@ int needleman_wunsch(array<char,SIZE> a, array<char,SIZE> b) {
 }
 
 
-char buffer[1024*1024];
+char buffer[1024*1024*128];
 
 int main() {
 
-	freopen(nullptr, "rb", stdin);
+//	freopen(nullptr, "rb", stdin);
 	size_t inputsize = std::fread(buffer, 1, sizeof buffer, stdin);
 
 	string_view input(buffer, inputsize);
@@ -82,12 +83,14 @@ int main() {
     				tie(s0[k*4],s0[k*4+1],s0[k*4+2],s0[k*4+3]) = convert_byte(*(s0_binary+i*16+k));
     				tie(s1[k*4],s1[k*4+1],s1[k*4+2],s1[k*4+3]) = convert_byte(*(s1_binary+j*16+k));
 	    		}
-
+			measure_start();
     			int score = needleman_wunsch(s0, s1);
+			measure_end();
     			char space = j<s1_words*4-1 ? ' ' : '\n';
 	    		cout<<score<<space;
     		}
 	}
+	measure_write("nw", "cpu", binary_bytes);
 
 	return 0;
 }

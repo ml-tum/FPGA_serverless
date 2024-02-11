@@ -9,11 +9,8 @@ RUN chmod +x /usr/bin/fwatchdog
 
 # Install packages
 RUN apk upgrade --update-cache --available && \
-    apk add openssl openssl-dev g++ && \
+    apk add g++ && \
     rm -rf /var/cache/apk/*
-#RUN apk upgrade --update-cache --available && \
-#    apk add openssl && \
-#    rm -rf /var/cache/apk/*
 
 # Add non root user
 RUN addgroup -S app && adduser app -S -G app
@@ -24,11 +21,9 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-#ENV fprocess="openssl enc -aes-128-ecb -K 2b7e151628aed2a6abf7158809cf4f3c"
-COPY aes128ecb.cpp util.h .
-RUN g++ -O3 -march=native -o aes128ecb aes128ecb.cpp -lssl -lcrypto
-ENV fprocess="/home/app/aes128ecb"
-
+COPY matmul.cpp .
+RUN g++ -O3 -march=native -o matmul matmul.cpp
+ENV fprocess="/home/app/matmul"
 # Set to true to see request in function logs
 ENV write_debug="true"
 

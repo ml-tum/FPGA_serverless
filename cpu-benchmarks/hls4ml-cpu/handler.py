@@ -5,30 +5,49 @@ from tensorflow.keras.models import load_model
 from qkeras.utils import _add_supported_quantized_objects
 from tensorflow_model_optimization.sparsity.keras import strip_pruning
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
+from os.path import exists
 
 co = {}
 _add_supported_quantized_objects(co)
 co['PruneLowMagnitude'] = pruning_wrapper.PruneLowMagnitude
-model = load_model('/home/app/function/quantized_pruned_cnn_model.h5', custom_objects=co)
+
+pwd_path = 'quantized_pruned_cnn_model.h5'
+ctr_path = '/home/app/function/quantized_pruned_cnn_model.h5'
+
+if exists(pwd_path):
+    model = load_model(pwd_path, custom_objects=co)
+elif exists(ctr_path):
+    model = load_model(ctr_path, custom_objects=co)
+else:
+    raise RuntimeError("model not found");
+
 
 def handle(event, context):
     data = event.body
-    delimiter = data.find(b'\n')
-    count = int(data[0:delimiter])
-    binary = data[delimiter+1:]
-    
-    nparr = np.frombuffer(binary,dtype=np.ubyte)
-    nparr = nparr.reshape((count,32,32,3))
-    X_test = tf.cast(nparr, tf.float32) / 255.0
-    
-    Y = model.predict(X_test)
-    Y_classes = Y.argmax(axis=1)
-    
-    results = [f"Result: {cls}, Score: {y[cls]:.4f}" for (cls, y) in zip(Y_classes, Y)]
-    results = "\n".join(results)
-  
+    results = handle_request(data)
     return {
         "statusCode": 200,
         "body": results
     }
-  
+
+def noop():
+    pass
+
+def handle_request(data, measure_start=noop, measure_end=noop):
+    delimiter = data.find(b'\n')
+    count = int(data[0:delimiter])
+    binary = data[delimiter+1:]
+
+    nparr = np.frombuffer(binary,dtype=np.ubyte)
+    nparr = nparr.reshape((count,32,32,3))
+    X_test = tf.cast(nparr, tf.float32) / 255.0
+
+    measure_start()
+    Y = model.predict(X_test)
+    measure_end()
+    Y_classes = Y.argmax(axis=1)
+
+    results = [f"Result: {cls}, Score: {y[cls]:.4f}" for (cls, y) in zip(Y_classes, Y)]
+    results = "\n".join(results)
+
+    return results

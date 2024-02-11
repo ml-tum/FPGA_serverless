@@ -12,6 +12,9 @@ fi
 
 faas-cli build --shrinkwrap -f $1.yml
 
+cp ./util/util.h ./build/$1/util.h
+cp ./util/util.h ./$1/util.h
+
 if [ "$1" == "hls4ml-cpu" ]; then
     sudo buildctl build --frontend dockerfile.v0 --local context=./build/$1/ --local dockerfile=./build/$1/ --output type=image,name=docker.io/ccgroup47/myrepo:$1,push=true
 else
