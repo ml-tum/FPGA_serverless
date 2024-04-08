@@ -1,0 +1,2 @@
+	hyperloglog-cpu	hyperloglog-fpga	corner-cpu	corner-fpga	gzip-cpu	gzip-fpga	newu-cpu	newu-fpga
+0	179598.844	39153.048	192600.214	17623.028	28848.873	1604.696	103126.904	1144.990

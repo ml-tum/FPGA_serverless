@@ -91,7 +91,7 @@ def annotate_bar_values_us(g: Any, offsets=None):
         labels = [f'{s}{(v.get_width()*1000*1000):.1f}us' for s,v in zip(space, c)]
         g.ax.bar_label(c, labels=labels, label_type='edge', fontsize=7)
 
-def images(df: pd.DataFrame, name: str, names: List[str] = []) -> Any:
+def simple_bars(df: pd.DataFrame, name: str, names: List[str] = []) -> Any:
     if len(names) == 0: names = [name]
 
     width = 3.3
@@ -141,6 +141,155 @@ def images(df: pd.DataFrame, name: str, names: List[str] = []) -> Any:
 
     g.despine()
     ##format(g.ax.xaxis, "useconds")
+    return g
+
+def stacked_bars(df: pd.DataFrame, name: str, names: List[str] = []) -> Any:
+    if len(names) == 0: names = [name]
+
+    print(df)
+    width = 3.3
+    aspect = 1.2
+    g = df.plot(
+        stacked=True,
+        kind='barh',
+        x='Index',
+        color=[palette[1], col_base, palette[3], palette[2]],
+    )
+    #plt.gca().invert_yaxis()
+    g.set_ylabel("Apps")
+    g.set_xlabel("Time (s)")
+    g.set_yticks(g.get_yticks());
+    ##g.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
+    ##g.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
+    # hatches = ["//", "..", "//|", "..|"]
+    hatches = ["", "/", "..", "*"]
+    for bars, hatch in zip(g.containers, hatches):
+        for bar in bars:
+            bar.set_hatch(hatch)
+            bar.set_edgecolor('k')
+    ##apply_hatch(plt, patch_legend=False, hatch_list=hatches)
+    ##annotate_bar_values_kB(g)
+    ##g._legend.remove()
+    ##g._legend.set_title("")
+    ##sns.move_legend(g, "upper right", bbox_to_anchor=(0.77, 1.01), labelspacing=.2)
+    # g.ax.set_xlim(0, 2500000)
+    ##g.ax.set_xlim(0, 2800000)
+
+    FONT_SIZE = 9
+    g.annotate(
+        "Lower is better",
+        xycoords="axes points",
+        xy=(0, 0),
+        xytext=(-20, -27),
+        fontsize=FONT_SIZE,
+        color="navy",
+        weight="bold",
+    )
+    g.annotate(
+        "",
+        xycoords="axes points",
+        xy=(-20-15, -25),
+        xytext=(-20, -25),
+        fontsize=FONT_SIZE,
+        arrowprops=dict(arrowstyle="-|>", color="navy"),
+    )
+
+    ##g.despine()
+    ##format(g.ax.xaxis, "useconds")
+    return plt
+
+def parse_app_system(df: pd.DataFrame) -> pd.DataFrame:
+    def h(row: Any) -> Any:
+        if "hyperloglog" in row.system:
+            return "HyperLogLog"
+        elif "corner" in row.system:
+            return "Corner-Detection"
+        elif "gzip" in row.system:
+            return "Gzip"
+        elif "newu" in row.system:
+            return "NeWu"
+
+    app = df.apply(h, axis=1)
+    ret = df.assign(app=app)
+
+    def k(row: Any) -> Any:
+        if "-cpu" in row.system:
+            return f"{row.app}-cpu"
+        else:
+            return f"{row.app}-fpga"
+
+    devapp = ret.apply(k, axis=1)
+    ret = ret.assign(devapp=devapp)
+
+    def k(row: Any) -> Any:
+        if "-cpu" in row.system:
+            return f"cpu"
+        else:
+            return f"fpga"
+
+    execdev = ret.apply(k, axis=1)
+    ret = ret.assign(execdev=execdev)
+
+    return ret
+
+def images(df: pd.DataFrame, name: str, names: List[str] = []) -> Any:
+    if len(names) == 0: names = [name]
+    df = df.melt(id_vars=["Unnamed: 0"], var_name="system", value_name=f"exec-time")
+    df = parse_app_system(df)
+    df = df.sort_values(by="devapp", ascending=False)
+    print(df)
+
+    # df = pd.concat([ df[df["system"] == n] for n in names ])
+    # df = df.append(dict(system=r"human", seconds=0.013), ignore_index=True)
+    # sns.set(font_scale=1.1)
+    # width = 2.8
+    width = 3.3
+    aspect = 1.2
+    g = catplot(
+        data=apply_aliases(df),
+        y=column_alias("app"),
+        # order=systems_order(df),
+        x=column_alias(f"exec-time"),
+        kind="bar",
+        hue="execdev",
+        height=width/aspect,
+        aspect=aspect,
+        palette=[col_base, palette[1]],
+    )
+    # apply_to_graphs(g.ax, False, 0.285)
+    # g.ax.set_xscale("log")
+    g.ax.set_ylabel("")
+    g.ax.set_xlabel("Execution time (ms)")
+    g.ax.set_yticklabels(df['app'].unique())
+    # hatches = ["//", "..", "//|", "..|"]
+    hatches = ["", "|", "..", "..|"]
+    apply_hatch(g, patch_legend=True, hatch_list=hatches)
+    g._legend.set_title("")
+    sns.move_legend(g, "upper right", bbox_to_anchor=(0.87, 1.01), labelspacing=.2)
+    # g.ax.set_xlim(0, 2500000)
+    #g.ax.set_xlim(0, 2800000)
+
+    FONT_SIZE = 9
+    g.ax.annotate(
+        "Lower is better",
+        xycoords="axes points",
+        xy=(-0, 0),
+        xytext=(-65, -27),
+        fontsize=FONT_SIZE,
+        color="navy",
+        weight="bold",
+    )
+    g.ax.annotate(
+        "",
+        xycoords="axes points",
+        xy=(-70-15, -25),
+        xytext=(-70, -25),
+        fontsize=FONT_SIZE,
+        arrowprops=dict(arrowstyle="-|>", color="navy"),
+    )
+
+    g.despine()
+    format(g.ax.xaxis, "kB")
     return g
 
 def compute_ratio(x: pd.DataFrame) -> pd.Series:
@@ -221,20 +370,28 @@ def main() -> None:
 
     if len(sys.argv) < 2:
         print(f"USAGE: {sys.argv[0]} graph.tsv...")
+
     for arg in sys.argv[1:]:
         tsv_path = Path(arg)
         df = pd.read_csv(tsv_path, sep="\t")
         assert isinstance(df, pd.DataFrame)
         name = tsv_path.stem
 
-        if name.startswith("all_apps"):
-            graph = images(df, "execution_time")
+        if name.startswith("apps_in_bars"):
+            graph = simple_bars(df, "execution_time")
+        elif name.startswith("stacked_boot_times"):
+            graph = stacked_bars(df, "Startup_time")
+        elif name.startswith("cpu_vs_fpga"):
+            graph = images(df, "Execution time CPU vs FPGA")
+        elif name.startswith("flat_cpu_vs_fpga"):
+            graph = images(df, "Execution time CPU vs FPGA")
         else:
             print(f"unhandled graph name: {tsv_path}", file=sys.stderr)
             sys.exit(1)
 
-        fname = "figure"
+        fname = name + ".pdf"
         print(f"write {fname}")
+        graph.savefig(MEASURE_RESULTS / name, bbox_inches='tight')
         graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
 
 if __name__ == "__main__":
