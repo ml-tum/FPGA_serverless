@@ -1,6 +1,6 @@
 from unittest import TestCase
 from datetime import datetime
-from fpga_utilization import FPGAUsageTimeTracker
+from usage import FPGAUsageTimeTracker
 
 class TestFpgaUtilization(TestCase):
     def test_fpga_utilization(self):
@@ -15,10 +15,10 @@ class TestFpgaUtilization(TestCase):
             (datetime(2023, 5, 12, 9, 4, 0),1)
         ]
         for date, duration in dates:
-            fpga_utilization.capture_request(date, duration)
+            fpga_utilization.add(date, duration)
 
         # Get EMA FPGA utilization
-        self.assertEqual(fpga_utilization.get_recent_usage_time(), 5)
+        self.assertEqual(fpga_utilization.get_window_value(), 5)
 
     def test_decay(self):
         fpga_utilization = FPGAUsageTimeTracker()
@@ -38,12 +38,12 @@ class TestFpgaUtilization(TestCase):
             (datetime(2023, 5, 12, 9, 4, 0), 1)
         ]
         for date, duration in dates:
-            fpga_utilization.capture_request(date, duration)
+            fpga_utilization.add(date, duration)
 
         fpga_utilization.decay(datetime(2023, 5, 12, 9, 4, 0))
 
         # Get EMA FPGA utilization
-        self.assertEqual(fpga_utilization.get_recent_usage_time(), 5)
+        self.assertEqual(fpga_utilization.get_window_value(), 5)
 
     def test_decay_threshold(self):
         fpga_utilization = FPGAUsageTimeTracker()
@@ -60,12 +60,34 @@ class TestFpgaUtilization(TestCase):
             (datetime(2023, 5, 12, 8, 10, 0), 1)
         ]
         for date, duration in dates:
-            fpga_utilization.capture_request(date, duration)
+            fpga_utilization.add(date, duration)
 
         fpga_utilization.decay(datetime(2023, 5, 12, 8, 10, 0))
 
         # Get EMA FPGA utilization
-        self.assertEqual(3, fpga_utilization.get_recent_usage_time())
+        self.assertEqual(3, fpga_utilization.get_window_value())
+
+    def test_benchmark_decay(self):
+        fpga_utilization = FPGAUsageTimeTracker()
+
+        # test cases
+        dates = [
+            # decay
+            (datetime(2023, 5, 12, 8, 4, 0), 1),
+            (datetime(2023, 5, 12, 8, 5, 0), 1),
+
+            # not decay
+            (datetime(2023, 5, 12, 8, 6, 0), 1),
+            (datetime(2023, 5, 12, 8, 9, 0), 1),
+            (datetime(2023, 5, 12, 8, 10, 0), 1)
+        ]
+        for date, duration in dates:
+            fpga_utilization.add(date, duration)
+
+        fpga_utilization.decay(datetime(2023, 5, 12, 8, 10, 0))
+
+        # Get EMA FPGA utilization
+        self.assertEqual(3, fpga_utilization.get_window_value())
 
     def test_decay_threshold_2(self):
         fpga_utilization = FPGAUsageTimeTracker()
@@ -77,9 +99,9 @@ class TestFpgaUtilization(TestCase):
             (datetime(2023, 5, 12, 9, 4, 0), 1)
         ]
         for date, duration in dates:
-            fpga_utilization.capture_request(date, duration)
+            fpga_utilization.add(date, duration)
 
         fpga_utilization.decay(datetime(2023, 5, 12, 9, 4, 0))
 
         # Get EMA FPGA utilization
-        self.assertEqual(fpga_utilization.get_recent_usage_time(), 1)
+        self.assertEqual(fpga_utilization.get_window_value(), 1)

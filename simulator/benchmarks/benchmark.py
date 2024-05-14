@@ -1,3 +1,7 @@
+import newrelic.agent
+
+newrelic.agent.initialize("../newrelic.ini")
+
 import datetime
 import os
 
@@ -8,7 +12,13 @@ import itertools
 import multiprocessing
 from tqdm import tqdm
 
+def run_wrapped(input):
+    newrelic.agent.register_application(timeout=10)
+    data=run_simulator(input)
+    newrelic.agent.shutdown_agent(10)
+    return data
 
+@newrelic.agent.background_task(name="run_simulator")
 def run_simulator(input):
     schedulerWeights = input["SCHEDULER_WEIGHTS"]
 
@@ -17,6 +27,7 @@ def run_simulator(input):
         RECENT_FPGA_USAGE_TIME_WEIGHT=schedulerWeights["RECENT_FPGA_USAGE_TIME_WEIGHT"],
         RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT=schedulerWeights["RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT"],
 
+        CHARACTERIZED_FUNCTIONS_LABEL=input["CHARACTERIZED_FUNCTIONS"]["label"],
         CHARACTERIZED_FUNCTIONS=input["CHARACTERIZED_FUNCTIONS"]["value"],
 
         MAX_REQUESTS=input["MAX_REQUESTS"],
@@ -26,7 +37,7 @@ def run_simulator(input):
         NUM_FPGA_SLOTS_PER_NODE=input["NUM_FPGA_SLOTS_PER_NODE"],
         FUNCTION_HOST_COLDSTART_TIME_MS=input.get("FUNCTION_PLACEMENT_IS_COLDSTART", False),
 
-        ARRIVAL_POLICY=input.get("ARRIVAL_POLICY", False),
+        ARRIVAL_POLICY=input.get("ARRIVAL_POLICY", "FIFO"),
 
         FUNCTION_PLACEMENT_IS_COLDSTART=input.get("FUNCTION_PLACEMENT_IS_COLDSTART", False),
 
@@ -43,7 +54,7 @@ def run_simulator(input):
         "time_spent_processing": time_spent_processing,
         "nodes": len(nodes),
         "apps": len(apps),
-        "arrival_policy": input.get("ARRIVAL_POLICY", False),
+        "arrival_policy": input.get("ARRIVAL_POLICY", "FIFO"),
         "function_placements_per_node": metrics["function_placements_per_node"],
         "fpga_reconfigurations_per_node": metrics["fpga_reconfigurations_per_node"],
         "metrics_per_node_over_time": metrics["metrics_per_node_over_time"],
@@ -75,14 +86,18 @@ def decode_scheduler_weights(scheduler_weights):
 
 
 def run_benchmark(inputs):
-    pool = multiprocessing.Pool(processes=8)
+    num_processes = 8
+
+    print(f"launching {num_processes} processes")
+
+    pool = multiprocessing.Pool(processes=num_processes)
 
     inputs = [dict(zip(inputs, v)) for v in itertools.product(*inputs.values())]
     pbar = tqdm(total=len(inputs))
 
     results = []
 
-    for result in pool.imap_unordered(run_simulator, inputs):
+    for result in pool.imap_unordered(run_wrapped, inputs):
         results.append(result)
         pbar.update()
 

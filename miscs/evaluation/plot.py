@@ -69,10 +69,12 @@ def systems_order(df: pd.DataFrame) -> List[str]:
 
 def catplot(**kwargs: Any) -> Any:
     # kwargs.setdefault("palette", "Greys")
-    kwargs.setdefault("edgecolor", "k")
-    kwargs.setdefault("errcolor", "black")
-    kwargs.setdefault("errwidth", 1)
-    kwargs.setdefault("capsize", 0.2)
+    if "kind" not in kwargs or (kwargs["kind"] != "box" and kwargs["kind"] != "point"):
+        kwargs.setdefault("edgecolor", "k")
+        kwargs.setdefault("errcolor", "black")
+        kwargs.setdefault("errwidth", 1)
+        kwargs.setdefault("capsize", 0.2)
+
     g = sns.catplot(**kwargs)
     g.despine(top=False, right=False)
     # plt.autoscale()

@@ -1,20 +1,21 @@
+import os
+
+import newrelic.agent
 import csv
 import datetime
 import random
 import preprocess
+from collections import deque
 
-import fpga_utilization
-import baseline_utilization
+import usage
 
 
-# alternative strategy to LRU/JIT eviction: keep functions/bitstreams around until timeout, then evict
-def decay(nodes, functions, current_ts, FUNCTION_KEEPALIVE):
-    # remove bitstreams that have expired
-    for nodeIdx in nodes:
-        node = nodes[nodeIdx]
+# Remove functions that are past the keepalive, keep bitstreams configured (no benefit in removing them)
+def evict_inactive_functions(recently_used_nodes, functions, current_ts, FUNCTION_KEEPALIVE):
+    for nodeIdx in recently_used_nodes:
+        node = recently_used_nodes[nodeIdx]
 
         # remove functions that have expired
-        nextBitstreams = set()
         nextFunctions = set()
         for functionName in node['functions']:
             function = functions.get(functionName)
@@ -24,27 +25,35 @@ def decay(nodes, functions, current_ts, FUNCTION_KEEPALIVE):
             if functionAge <= FUNCTION_KEEPALIVE:
                 # print("Function removed: {}".format(function['name']))
                 nextFunctions.add(functionName)
+            # TODO Make sure this works as expected
+            else:
+                function['last_node'] = None
 
-            if functionName in node['bitstreams']:
-                bitstreamAge = (current_ts - function['bitstream_last_invoked_at']).total_seconds()
-                if bitstreamAge <= FUNCTION_KEEPALIVE:
-                    nextBitstreams.add(functionName)
-
-        node['bitstreams'] = nextBitstreams
         node['functions'] = nextFunctions
     pass
 
 
-def create_node(nodes: dict):
+def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2):
     nextId = len(nodes)
+
+    slots = {}
+    for i in range(NUM_FPGA_SLOTS_PER_NODE):
+        slots[i] = {
+            'current_bitstream': None,
+            'earliest_start_date': None,
+        }
+
     new_node = {
         'id': nextId,
         'functions': set(),
+
         'bitstreams': set(),
-        'recent_baseline_utilization': baseline_utilization.BaselineUtilizationTracker(),
-        'recent_fpga_usage_time': fpga_utilization.FPGAUsageTimeTracker(),
-        'recent_fpga_reconfiguration_time': fpga_utilization.FPGAReconfigurationTimeTracker(),
-        'recent_fpga_reconfiguration_count': fpga_utilization.FPGAReconfigurationCountTracker(),
+        'fpga_slots': slots,
+
+        'recent_baseline_utilization': usage.BaselineUtilizationTracker(),
+        'recent_fpga_usage_time': usage.FPGAUsageTimeTracker(),
+        'recent_fpga_reconfiguration_time': usage.FPGAReconfigurationTimeTracker(),
+        'recent_fpga_reconfiguration_count': usage.FPGAReconfigurationCountTracker(),
     }
     nodes[len(nodes)] = new_node
     return new_node
@@ -57,24 +66,30 @@ def next_best_node(nodes: dict, functionName: str, recent_fpga_usage_time_weight
     if len(nodes) == 0:
         return None
 
+    # if we have more than 100 nodes, take a random sample of 100 nodes
+    if len(nodes) > 100:
+        nodes_to_select_from = random.sample(list(nodes.keys()), 100)
+    else:
+        nodes_to_select_from = list(nodes.keys())
+
     prescored = []
-    for nodeIdx in nodes:
-        node = nodes[nodeIdx]
+    for nodeKey in nodes_to_select_from:
+        node = nodes.get(nodeKey)
 
         # collect relevant criteria
-        baseline_utilization = node['recent_baseline_utilization'].get_recent_compute_time()
+        baseline_utilization = node['recent_baseline_utilization'].get_window_value()
 
         # recent FPGA utilization in seconds
-        recent_utilization = node['recent_fpga_usage_time'].get_recent_usage_time()
+        recent_utilization = node['recent_fpga_usage_time'].get_window_value()
 
         # recent reconfiguration times in seconds
-        recent_reconfiguration_times = node['recent_fpga_reconfiguration_time'].get_recent_reconfiguration_time()
+        recent_reconfiguration_times = node['recent_fpga_reconfiguration_time'].get_window_value()
 
         has_fitting_bitstream = 0
         if functionName in node['bitstreams']:
             has_fitting_bitstream = 1
 
-        score = (nodeIdx, recent_utilization, recent_reconfiguration_times, has_fitting_bitstream, baseline_utilization)
+        score = (nodeKey, recent_utilization, recent_reconfiguration_times, has_fitting_bitstream, baseline_utilization)
 
         prescored.append(score)
 
@@ -91,9 +106,9 @@ def next_best_node(nodes: dict, functionName: str, recent_fpga_usage_time_weight
 
     # calculate normalized to best scores
     scored = []
-    for nodeIdx, _, _, has_fitting_bitstream, _ in prescored:
-        scored.append((nodeIdx,
-                       score_node(sorted_usage_time, sorted_reconfiguration_time, sorted_baseline_utilization, nodeIdx,
+    for nodeKey, _, _, has_fitting_bitstream, _ in prescored:
+        scored.append((nodeKey,
+                       score_node(sorted_usage_time, sorted_reconfiguration_time, sorted_baseline_utilization, nodeKey,
                                   has_fitting_bitstream, recent_fpga_usage_time_weight,
                                   recent_fpga_reconfiguration_time_weight, fpga_bitstream_locality_weight)))
 
@@ -170,15 +185,13 @@ def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER
         functions[function] = {
             'name': function,
             'last_invoked_at': end_timestamp,
+            'last_node': None,
         }
 
     # check if function is deployed on any node
     deployed_on = None
-    for nodeIdx in nodes:
-        node = nodes.get(nodeIdx)
-        if function in node['functions']:
-            deployed_on = node
-            break
+    if functions[function]['last_node'] is not None:
+        deployed_on = nodes.get(functions[function]['last_node'])
 
     is_function_placement = deployed_on is None
 
@@ -188,112 +201,104 @@ def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER
                                      RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT, FPGA_BITSTREAM_LOCALITY_WEIGHT)
         if deployed_on is None:
             # no node has enough space, create new node
-            deployed_on = create_node(nodes)
+            deployed_on = create_node(nodes, NUM_FPGA_SLOTS_PER_NODE)
 
             if ENABLE_LOGS:
                 print("New node created: {}".format(deployed_on['id']))
 
         deployed_on['functions'].add(function)
-        if ENABLE_LOGS:
-            print("Function deployed on node: {}".format(deployed_on['id']))
+        functions[function]['last_node'] = deployed_on['id']
+        # if ENABLE_LOGS:
+        #     print("Function deployed on node: {}".format(deployed_on['id']))
 
     return deployed_on, is_function_placement
 
 
-# evict a function from a node
-def evict_bitstream(functions, node, ENABLE_LOGS):
-    # find least recently used bitstream
-    lru_bitstream = None
-    for bitstream in node['bitstreams']:
-        if lru_bitstream is None or functions[bitstream]['bitstream_last_invoked_at'] < functions[lru_bitstream][
-            'bitstream_last_invoked_at']:
-            lru_bitstream = bitstream
-
-    node['bitstreams'].remove(lru_bitstream)
-
-    if ENABLE_LOGS:
-        print("Evicted bitstream: {}, remaining: {}".format(lru_bitstream, node['bitstreams']))
-
-
 # acquire an FPGA slot for a function (place bitstream on node FPGA)
-def acquire_fpga_slot(functions, nodes, metrics, node, functionName, start_timestamp, end_timestamp,
+def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp, response_timestamp,
+                      global_timer, add_to_wait,
                       NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME):
     # check if function is deployed on any FPGA slot, update last_invoked_at
     function = functions.get(functionName)
 
+    slot = None
+    slot_key = None
+
     # otherwise deploy
     needs_reconfiguration = functionName not in node['bitstreams']
     if needs_reconfiguration:
+        # If all slots are occupied
         if len(node['bitstreams']) >= NUM_FPGA_SLOTS_PER_NODE:
-            # Primary: Evict least recently used bitstream
-            evict_bitstream(functions, node, ENABLE_LOGS)
+            # Find slot with earliest done date
+            earliest_start_date = None
+            for slotIdx in node['fpga_slots']:
+                current_slot = node['fpga_slots'][slotIdx]
+                if earliest_start_date is None or earliest_start_date > current_slot['earliest_start_date']:
+                    slot = current_slot
+                    slot_key = slotIdx
+                    earliest_start_date = current_slot['earliest_start_date']
 
-            # Other approach: Find another node with space
-            # node = handle_slot_overflow(function, nodes, metrics, NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, UTILIZATION_WEIGHT, RECONFIGURATION_WEIGHT, BITSTREAM_WEIGHT)
+            # If slot is not available at current time, wait until it is
+            can_run_on_slot = earliest_start_date is None or earliest_start_date <= processing_start_timestamp
+            if not can_run_on_slot:
+                add_to_wait()
+
+                # all requests must wait until earliest_start_date of the earliest available slot
+                global_timer["time"] = earliest_start_date
+
+                return None, None
+
+            # "evict" previous bitstream from node
+            if slot["current_bitstream"] is not None:
+                node["bitstreams"].remove(slot["current_bitstream"])
+                slot["current_bitstream"] = None
+            slot["earliest_start_date"] = None
+        else:
+            # Find empty slot
+            for slotIdx in node['fpga_slots']:
+                if node['fpga_slots'][slotIdx]['current_bitstream'] is None:
+                    slot = node['fpga_slots'][slotIdx]
+                    slot_key = slotIdx
+                    break
 
         # deploy function on next best FPGA slot
         node['bitstreams'].add(functionName)
-        function['bitstream_started_at'] = start_timestamp
+        function['bitstream_started_at'] = processing_start_timestamp
+        slot['current_bitstream'] = functionName
+        slot['earliest_start_date'] = response_timestamp
 
         # coldstart if bitstream was not placed on this FPGA before
-        if ENABLE_LOGS:
-            print("Added bitstream: {}, now at {}/{}: {}".format(functionName, len(node['bitstreams']),
-                                                                 NUM_FPGA_SLOTS_PER_NODE, node['bitstreams']))
+        # if ENABLE_LOGS:
+        #     print("Added bitstream: {}, now at {}/{}: {}".format(functionName, len(node['bitstreams']),
+        #                                                          NUM_FPGA_SLOTS_PER_NODE, node['bitstreams']))
 
         if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:
-            metrics['fpga_reconfigurations_per_node'][node['id']] = [start_timestamp]
+            metrics['fpga_reconfigurations_per_node'][node['id']] = [processing_start_timestamp]
         else:
-            metrics['fpga_reconfigurations_per_node'][node['id']].append(start_timestamp)
+            metrics['fpga_reconfigurations_per_node'][node['id']].append(processing_start_timestamp)
 
-        node['recent_fpga_reconfiguration_count'].add_reconfiguration(end_timestamp)
-        node['recent_fpga_reconfiguration_time'].add_reconfiguration(end_timestamp, FPGA_RECONFIGURATION_TIME)
+        node['recent_fpga_reconfiguration_count'].add(response_timestamp, 1)
+        node['recent_fpga_reconfiguration_time'].add(response_timestamp, FPGA_RECONFIGURATION_TIME)
 
-        if ENABLE_LOGS:
-            print("Coldstart for function {}, total {}".format(functionName, metrics['coldstarts']))
+        # if ENABLE_LOGS:
+        #     print("Coldstart for function {}, total {}".format(functionName, metrics['coldstarts']))
+    else:
+        # find slot
+        for slotIdx in node['fpga_slots']:
+            if node['fpga_slots'][slotIdx]['current_bitstream'] == functionName:
+                slot_key = slotIdx
+                break
 
-    function['bitstream_last_invoked_at'] = end_timestamp
+    function['bitstream_last_invoked_at'] = response_timestamp
     nodes[node['id']] = node
 
-    return needs_reconfiguration
-
-
-# release an FPGA slot for a function (remove bitstream from node FPGA)
-def release_fpga_slot(functions, nodes, node, functionName, end_timestamp, ENABLE_LOGS):
-    # check if function is deployed on any FPGA slot, update last_invoked_at
-    function = functions.get(functionName)
-
-    # otherwise deploy
-    if functionName in node['bitstreams']:
-        node['bitstreams'].remove(functionName)
-        function['bitstream_last_invoked_at'] = end_timestamp
-        nodes[node['id']] = node
-
-    if ENABLE_LOGS:
-        print("Released FPGA slot for {}".format(functionName))
-
-
-# handle_slot_overflow provides alternative strategy to handling the case where no
-# more slots are available by creating new node just in time and migrating workload
-def handle_slot_overflow(function, nodes, metrics, ENABLE_LOGS, UTILIZATION_WEIGHT, RECONFIGURATION_WEIGHT,
-                         BITSTREAM_LOCALITY_WEIGHT):
-    functionName = function['name']
-    # no FPGA slots available, deploy on next best node
-    node = next_best_node(nodes, functionName, UTILIZATION_WEIGHT, RECONFIGURATION_WEIGHT, BITSTREAM_LOCALITY_WEIGHT)
-    if node is None:
-        # no node has enough space, create new node
-        node['functions'].remove(functionName)
-        node = create_node(nodes)
-        node['functions'].add(functionName)
-        metrics['slot_overflows'] += 1
-        if ENABLE_LOGS:
-            print("Slot overflow, new node created: {}".format(node['id']))
-
-    return node
+    return needs_reconfiguration, slot_key
 
 
 # Function to process each row of the CSV file
 def process_row(
         nodes,
+        recently_used_nodes,
         functions,
         characterized_function,
         row,
@@ -309,9 +314,12 @@ def process_row(
         FPGA_BITSTREAM_LOCALITY_WEIGHT: float,
         FUNCTION_PLACEMENT_IS_COLDSTART: bool,
         FUNCTION_HOST_COLDSTART_TIME_MS: float,
-        last_request_timestamp,
+        previous_request_timestamp,
+        global_timer: dict,
+        add_to_wait: callable,
+        row_is_traced: bool
 ):
-    app, func, end_timestamp, duration = row
+    app, func, response_timestamp, duration = row
 
     # convert duration (seconds) to float
     duration = float(duration)
@@ -323,19 +331,50 @@ def process_row(
     duration = duration * 1000
 
     # get original start timestamp
-    start_timestamp = end_timestamp - datetime.timedelta(milliseconds=float(duration))
+    arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration))
 
     # adjust duration by expected acceleration
-    duration = duration * characterized_function["mean_speedup"]
+    duration = duration / characterized_function["mean_speedup"]
 
     # compute adjusted end timestamp
-    end_timestamp = start_timestamp + datetime.timedelta(milliseconds=float(duration))
+    response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration))
 
-    # we don't know how much time passed since last request so update host/slot occupancy
-    if FUNCTION_KEEPALIVE is not None:
-        decay(nodes, functions, start_timestamp, FUNCTION_KEEPALIVE)
+    processing_start_timestamp = arrival_timestamp
 
-    update_trackers(nodes, end_timestamp, ENABLE_LOGS)
+    # if request is waiting, it can only end after the previous request + its own duration
+    request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
+    if request_is_waiting:
+        waiting_time = (global_timer["time"] - arrival_timestamp).total_seconds()
+        metrics["makespan"] += waiting_time
+        # adjust end timestamp to account for waiting time
+        response_timestamp = global_timer["time"] + datetime.timedelta(milliseconds=float(
+            duration))  # could also write this as end_timestamp + datetime.timedelta(seconds=waiting_time)
+        processing_start_timestamp = global_timer["time"]
+
+    req_id = f"{app}-{func}-{arrival_timestamp}"
+    delay = (processing_start_timestamp - arrival_timestamp).total_seconds()
+    metrics['latencies'][req_id] = (arrival_timestamp, processing_start_timestamp, response_timestamp, duration, delay)
+
+    def time_elapsed_since_previous_request(delta_seconds: int):
+        return previous_request_timestamp['start'] is None or (
+                arrival_timestamp - previous_request_timestamp['start']).total_seconds() > delta_seconds
+
+    # we don't know how much time passed since last request so update host/slot occupancy (optimization: after 5s of last request)
+    if FUNCTION_KEEPALIVE is not None and time_elapsed_since_previous_request(5):
+        if row_is_traced:
+            with newrelic.agent.FunctionTrace("evict_inactive_functions"):
+                evict_inactive_functions(recently_used_nodes, functions, arrival_timestamp, FUNCTION_KEEPALIVE)
+        else:
+            evict_inactive_functions(recently_used_nodes, functions, arrival_timestamp,
+                                     FUNCTION_KEEPALIVE)  # TODO Check if this needs to run always
+
+    # decay utilization trackers every 30s
+    if time_elapsed_since_previous_request(30):
+        if row_is_traced:
+            with newrelic.agent.FunctionTrace("update_trackers"):
+                update_trackers(recently_used_nodes, response_timestamp, ENABLE_LOGS, True)
+        else:
+            update_trackers(recently_used_nodes, response_timestamp, ENABLE_LOGS, False)
 
     # limit requests to max for simulation
     if MAX_REQUESTS is not None and MAX_REQUESTS > 0 and metrics['requests'] > MAX_REQUESTS:
@@ -346,28 +385,40 @@ def process_row(
     metrics['requests'] += 1
     metrics['request_duration'] += duration
 
-    if ENABLE_LOGS:
-        time_spent_since_last_request = 0
-        if last_request_timestamp is not None and last_request_timestamp["end"] is not None:
-            time_spent_since_last_request = (start_timestamp - last_request_timestamp["end"]).total_seconds()
-        print("-- req; (+{}s) App: {}, Function: {}, Start Timestamp: {}, End Timestamp: {}, Duration: {}".format(
-            time_spent_since_last_request, app, func, start_timestamp, end_timestamp, duration))
+    # if ENABLE_LOGS:
+    #     time_spent_since_previous_request = 0
+    #     if previous_request_timestamp is not None and previous_request_timestamp["end"] is not None:
+    #         time_spent_since_previous_request = (start_timestamp - previous_request_timestamp["end"]).total_seconds()
+    #     print("-- req; (+{}s) App: {}, Function: {}, Start Timestamp: {}, End Timestamp: {}, Duration: {}".format(
+    #         time_spent_since_previous_request, app, func, start_timestamp, end_timestamp, duration))
 
     if ENABLE_PROGRESS_LOGS and metrics['requests'] % 1000 == 0:
         print("Requests: {}".format(metrics['requests']))
 
-    deployed_on, is_function_placement = place_function(func, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER_NODE,
-                                                        ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
-                                                        RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
-                                                        FPGA_BITSTREAM_LOCALITY_WEIGHT)
+    if row_is_traced:
+        with newrelic.agent.FunctionTrace("place_function"):
+            deployed_on, is_function_placement = place_function(func, response_timestamp, functions, nodes,
+                                                                NUM_FPGA_SLOTS_PER_NODE,
+                                                                ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
+                                                                RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
+                                                                FPGA_BITSTREAM_LOCALITY_WEIGHT)  # TODO Check if this needs to run always
+    else:
+        deployed_on, is_function_placement = place_function(func, response_timestamp, functions, nodes,
+                                                            NUM_FPGA_SLOTS_PER_NODE,
+                                                            ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
+                                                            RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
+                                                            FPGA_BITSTREAM_LOCALITY_WEIGHT)  # TODO Check if this needs to run always
+
+    if recently_used_nodes.get(deployed_on['id']) is None:
+        recently_used_nodes[deployed_on['id']] = deployed_on
 
     # update metrics
     if is_function_placement:
-        metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS
+        metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS / 1000
         if metrics['function_placements_per_node'].get(deployed_on['id']) is None:
-            metrics['function_placements_per_node'][deployed_on['id']] = [start_timestamp]
+            metrics['function_placements_per_node'][deployed_on['id']] = [arrival_timestamp]
         else:
-            metrics['function_placements_per_node'][deployed_on['id']].append(start_timestamp)
+            metrics['function_placements_per_node'][deployed_on['id']].append(arrival_timestamp)
 
     if metrics['requests_per_node'].get(deployed_on['id']) is None:
         metrics['requests_per_node'][deployed_on['id']] = 1
@@ -383,11 +434,25 @@ def process_row(
 
     if run_on_fpga:
         # keep processing request on fpga
-        needs_reconfiguration = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func, start_timestamp,
-                                                  end_timestamp,
-                                                  NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME)
+        if row_is_traced:
+            with newrelic.agent.FunctionTrace("acquire_fpga_slot"):
+                needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
+                                                                    processing_start_timestamp,
+                                                                    response_timestamp, global_timer, add_to_wait,
+                                                                    NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
+                                                                    FPGA_RECONFIGURATION_TIME)  # TODO Check if this needs to run always
+        else:
+            needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
+                                                                processing_start_timestamp,
+                                                                response_timestamp, global_timer, add_to_wait,
+                                                                NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
+                                                                FPGA_RECONFIGURATION_TIME)  # TODO Check if this needs to run always
+
+        metrics['latencies'][req_id] = (
+            arrival_timestamp, processing_start_timestamp, response_timestamp, duration, delay, slot_key)
+
         if needs_reconfiguration:
-            metrics['makespan'] += round(FPGA_RECONFIGURATION_TIME * 1000, 2)
+            metrics['makespan'] += FPGA_RECONFIGURATION_TIME
 
         if (FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement) or needs_reconfiguration:
             metrics['coldstarts'] += 1
@@ -400,12 +465,14 @@ def process_row(
     time_spent_on_cpu = (1 - fpga_ratio) * duration
     time_spent_on_fpga = fpga_ratio * duration
 
-    metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2)
+    metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2) / 1000
 
-    deployed_on['recent_baseline_utilization'].capture_request(end_timestamp, time_spent_on_cpu)
+    deployed_on['recent_baseline_utilization'].add(response_timestamp,
+                                                   time_spent_on_cpu)  # TODO Check if this needs to run always
 
     if run_on_fpga:
-        deployed_on['recent_fpga_usage_time'].capture_request(end_timestamp, time_spent_on_fpga)
+        deployed_on['recent_fpga_usage_time'].add(response_timestamp,
+                                                  time_spent_on_fpga)  # TODO Check if this needs to run always
 
         if metrics['fpga_usage_per_node'].get(deployed_on['id']) is None:
             metrics['fpga_usage_per_node'][deployed_on['id']] = time_spent_on_fpga
@@ -413,22 +480,22 @@ def process_row(
             metrics['fpga_usage_per_node'][deployed_on['id']] += time_spent_on_fpga
 
     # only trigger this if 30 seconds have passed to avoid recording way too many data points
-    if is_last_request or last_request_timestamp['start'] is None or (
-            start_timestamp - last_request_timestamp['start']).total_seconds() > 60 * 30:
-        fpga_reconfiguration_times = [node['recent_fpga_reconfiguration_time'].get_recent_reconfiguration_time() for
+    if is_last_request or time_elapsed_since_previous_request(
+            60 * 30):  # TODO Check if this arbitrary number is correct
+        fpga_reconfiguration_times = [node['recent_fpga_reconfiguration_time'].get_window_value() for
                                       node in nodes.values()]
-        fpga_usage_times = [node['recent_fpga_usage_time'].get_recent_usage_time() for node in nodes.values()]
-        baseline_utilization_times = [node['recent_baseline_utilization'].get_recent_compute_time() for node in
+        fpga_usage_times = [node['recent_fpga_usage_time'].get_window_value() for node in nodes.values()]
+        baseline_utilization_times = [node['recent_baseline_utilization'].get_window_value() for node in
                                       nodes.values()]
 
         metrics['metrics_per_node_over_time'].append({
-            'timestamp': start_timestamp,
+            'timestamp': arrival_timestamp,
             'baseline_utilization_time': baseline_utilization_times,
             'fpga_reconfiguration_time': fpga_reconfiguration_times,
             'fpga_usage_time': fpga_usage_times,
         })
-        last_request_timestamp['start'] = start_timestamp
-        last_request_timestamp['end'] = end_timestamp
+        previous_request_timestamp['start'] = arrival_timestamp
+        previous_request_timestamp['end'] = response_timestamp
 
     # Immediately releasing means we have to coldstart for every request
     # release_fpga_slot(functions, nodes, deployed_on, function, end_timestamp, ENABLE_LOGS)
@@ -436,26 +503,26 @@ def process_row(
     return True
 
 
-def update_trackers(nodes, end_timestamp, ENABLE_LOGS):
-    out = ""
-    for node in nodes.values():
+def update_trackers(recently_used_nodes, end_timestamp, ENABLE_LOGS, row_is_traced: bool):
+    if row_is_traced:
+        newrelic.agent.add_custom_span_attribute("recently_used_nodes", len(recently_used_nodes))
+
+    # instead of decaying all nodes, decay nodes that have recent usage and reset after this
+    for node in recently_used_nodes.values():
         node['recent_baseline_utilization'].decay(end_timestamp)
 
         node['recent_fpga_usage_time'].decay(end_timestamp)
         node['recent_fpga_reconfiguration_count'].decay(end_timestamp)
         node['recent_fpga_reconfiguration_time'].decay(end_timestamp)
 
-        if ENABLE_LOGS:
-            out += "{}: [{}, {}] ".format(node['id'], node['recent_fpga_usage_time'].get_recent_usage_time(),
-                                          node['recent_fpga_reconfiguration_count'].get_recent_reconfiguration_count())
-
-    if ENABLE_LOGS:
-        print(out)
+    recently_used_nodes.clear()
 
 
+@newrelic.agent.function_trace()
 def run_on_file(
         csv_file_path='AzureFunctionsInvocationTraceForTwoWeeksJan2021.txt',
 
+        CHARACTERIZED_FUNCTIONS_LABEL="",
         CHARACTERIZED_FUNCTIONS=None,
 
         # system parameters
@@ -478,6 +545,27 @@ def run_on_file(
         # if scale to zero is assumed, functions might have to be placed just in time, adding to the cold start
         FUNCTION_PLACEMENT_IS_COLDSTART=False
 ):
+    commitHash = os.getenv("COMMIT_HASH", "unknown")
+
+    newrelic.agent.add_custom_attributes([
+        ("COMMIT_HASH", commitHash),
+        ("CHARACTERIZED_FUNCTIONS_LABEL", CHARACTERIZED_FUNCTIONS_LABEL),
+        ("NUM_NODES", NUM_NODES),
+        ("NUM_FPGA_SLOTS_PER_NODE", NUM_FPGA_SLOTS_PER_NODE),
+        ("FPGA_RECONFIGURATION_TIME", FPGA_RECONFIGURATION_TIME),
+        ("FUNCTION_KEEPALIVE", FUNCTION_KEEPALIVE),
+        ("MAX_REQUESTS", MAX_REQUESTS),
+        ("FUNCTION_HOST_COLDSTART_TIME_MS", FUNCTION_HOST_COLDSTART_TIME_MS),
+        ("ARRIVAL_POLICY", ARRIVAL_POLICY),
+        ("RECENT_FPGA_USAGE_TIME_WEIGHT", RECENT_FPGA_USAGE_TIME_WEIGHT),
+        ("RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT", RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT),
+        ("FPGA_BITSTREAM_LOCALITY_WEIGHT", FPGA_BITSTREAM_LOCALITY_WEIGHT),
+        ("ENABLE_LOGS", ENABLE_LOGS),
+        ("ENABLE_PROGRESS_LOGS", ENABLE_PROGRESS_LOGS),
+        ("ENABLE_PRINT_RESULTS", ENABLE_PRINT_RESULTS),
+        ("FUNCTION_PLACEMENT_IS_COLDSTART", FUNCTION_PLACEMENT_IS_COLDSTART),
+    ])
+
     # stable random seed for reproducibility
     random.seed(42)
 
@@ -498,10 +586,12 @@ def run_on_file(
         'request_duration_per_node': {},
         'function_placements_per_node': {},
         'metrics_per_node_over_time': [],
+
+        'latencies': {}
     }
 
     for i in range(NUM_NODES):
-        created_node = create_node(nodes)
+        created_node = create_node(nodes, NUM_FPGA_SLOTS_PER_NODE)
 
         # initialize per-node metrics
         metrics['fpga_reconfigurations_per_node'][created_node['id']] = []
@@ -514,7 +604,7 @@ def run_on_file(
         print("Loading traces")
 
     # load traces from disk
-    traces = preprocess.load_traces(csv_file_path)
+    traces = preprocess.load_traces(csv_file_path, MAX_REQUESTS)
 
     if ENABLE_LOGS:
         print(f"Loaded {len(traces)} traces, now preprocessing")
@@ -528,15 +618,67 @@ def run_on_file(
     if ENABLE_LOGS:
         print("Preprocessed traces")
 
-    last_request_timestamp = {
+    previous_request_timestamp = {
         'start': None,
         'end': None
     }
 
-    for fntype, row, _ in traces:
+    recently_used_nodes = {}
+
+    global_timer = {
+        "time": None
+    }
+    waiting = deque()
+
+    num_traces = len(traces)
+    while True:
+        if len(traces) == 0 and len(waiting) == 0:
+            break
+
+        waiting_req = waiting.popleft() if len(waiting) > 0 else None
+        if waiting_req is None:
+            # "pull" next available request
+            fntype, row, end_timestamp = traces.popleft()
+        else:
+            fntype, row, end_timestamp = waiting_req
+
         characterized_function = CHARACTERIZED_FUNCTIONS.get(fntype)
-        if process_row(
+
+        def add_to_wait():
+            waiting.appendleft((fntype, row, end_timestamp))
+
+        # every 0.2% of max requests, record function trace (so we end up with 500 traces)
+        if num_traces > 500 and metrics['requests'] % (num_traces // 500) == 0:
+            with newrelic.agent.FunctionTrace(name="process_row"):
+                newrelic.agent.add_custom_span_attribute("request_index", metrics['requests'])
+
+                res = process_row(
+                    nodes,
+                    recently_used_nodes,
+                    functions,
+                    characterized_function,
+                    row,
+                    metrics,
+                    MAX_REQUESTS,
+                    FUNCTION_KEEPALIVE,
+                    NUM_FPGA_SLOTS_PER_NODE,
+                    ENABLE_LOGS,
+                    FPGA_RECONFIGURATION_TIME,
+                    ENABLE_PROGRESS_LOGS,
+                    RECENT_FPGA_USAGE_TIME_WEIGHT,
+                    RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
+                    FPGA_BITSTREAM_LOCALITY_WEIGHT,
+                    FUNCTION_PLACEMENT_IS_COLDSTART,
+                    FUNCTION_HOST_COLDSTART_TIME_MS,
+                    previous_request_timestamp,
+                    global_timer,
+                    add_to_wait,
+                    True,
+                )
+        else:
+            res = process_row(
                 nodes,
+                recently_used_nodes,
                 functions,
                 characterized_function,
                 row,
@@ -552,8 +694,13 @@ def run_on_file(
                 FPGA_BITSTREAM_LOCALITY_WEIGHT,
                 FUNCTION_PLACEMENT_IS_COLDSTART,
                 FUNCTION_HOST_COLDSTART_TIME_MS,
-                last_request_timestamp
-        ) is False:
+                previous_request_timestamp,
+                global_timer,
+                add_to_wait,
+                False,
+            )
+
+        if res is False:
             break
 
     coldstart_percent = round((metrics['coldstarts'] / metrics['requests']) * 100, 2)
@@ -567,5 +714,18 @@ def run_on_file(
     if ENABLE_PRINT_RESULTS:
         print("Time spent on coldstarts {}h, time spent processing {}h".format(time_spent_on_cold_starts,
                                                                                time_spent_processing))
+
+    print(
+        f"Finishing run, num nodes: {NUM_NODES}, num FPGA slots: {NUM_FPGA_SLOTS_PER_NODE}, recent FPGA usage time weight: {RECENT_FPGA_USAGE_TIME_WEIGHT}, recent FPGA reconfiguration time weight: {RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT}, FPGA bitstream locality weight: {FPGA_BITSTREAM_LOCALITY_WEIGHT}, arrival policy: {ARRIVAL_POLICY}, characterized functions label: {CHARACTERIZED_FUNCTIONS_LABEL}")
+
+    newrelic.agent.add_custom_attributes([
+        ("coldstarts", metrics['coldstarts']),
+        ("coldstart_percent", coldstart_percent),
+        ("time_spent_on_cold_starts", time_spent_on_cold_starts),
+        ("time_spent_processing", time_spent_processing),
+        ("nodes", len(nodes)),
+        ("apps", len(functions)),
+        ("makespan", metrics["makespan"]),
+    ])
 
     return nodes, functions, metrics, coldstart_percent, time_spent_on_cold_starts, time_spent_processing

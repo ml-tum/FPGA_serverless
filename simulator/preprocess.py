@@ -1,9 +1,10 @@
+import newrelic.agent
 import queue
 from collections import deque
 from datetime import timedelta, datetime
 from csv import reader
 import numpy as np
-
+import pandas as pd
 
 def convert_end_timestamp_to_datetime(end_timestamp):
     custom_epoch = datetime(2021, 1, 31)
@@ -14,30 +15,65 @@ def convert_end_timestamp_to_datetime(end_timestamp):
     return dt
 
 
-def load_traces(csv_file_path: str):
+@newrelic.agent.function_trace()
+def load_traces(csv_file_path: str, MAX_REQUESTS: int = 0):
     # create request queue
     queue = deque()
 
     # Read the CSV file in a streaming manner
+    num=0
     with open(csv_file_path, 'r') as csv_file:
         csv_reader = reader(csv_file)
         next(csv_reader)  # Skip the header row
 
         for row in csv_reader:
+            if MAX_REQUESTS is not None and MAX_REQUESTS > 0 and num > MAX_REQUESTS:
+                return queue
+
+            num += 1
+
             end_timestamp = convert_end_timestamp_to_datetime(row[2])
             row[2] = end_timestamp
 
+            # convert duration to float
+            row[3] = float(row[3])
+
             queue.append((row, end_timestamp))
 
+    # overhead: 1.69GB -> 5.3GB (3.1x)
     return queue
 
 
+@newrelic.agent.function_trace()
 def characterize_traces(CHARACTERIZED_FUNCTIONS: dict, traces: deque):
+    # optimization: compute characterization values ahead of time
+    characterizations = CHARACTERIZED_FUNCTIONS.values()
+    max_req_per_sec = max([characterization["characterization"]["avg_req_per_sec"] for characterization in
+                           characterizations])
+    min_req_per_sec = min([characterization["characterization"]["avg_req_per_sec"] for characterization in
+                           characterizations])
+    max_req_duration = max([characterization["characterization"]["avg_req_duration"] for characterization in
+                            characterizations])
+    min_req_duration = min([characterization["characterization"]["avg_req_duration"] for characterization in
+                            characterizations])
+
     currentCount = len(traces)
-    full_traces_list = list(traces.copy())
+
+    # optimization: compute rows for function ahead of time, store in cache (dict)
+    full_traces_list = list(traces)
+    rows_for_function = dict()
+    for row in full_traces_list:
+        row = row[0]
+
+        func = row[1]
+
+        if func not in rows_for_function:
+            rows_for_function[func] = []
+        rows_for_function[func].append(row)
 
     previouslyCharacterized = dict()
 
+    # overhead: loops over 10m rows
     for i in range(currentCount):
         request = traces.popleft()
         row, end_timestamp = request
@@ -49,23 +85,33 @@ def characterize_traces(CHARACTERIZED_FUNCTIONS: dict, traces: deque):
         if func in previouslyCharacterized:
             fntype = previouslyCharacterized[func]
         else:
-            fntype = characterize_func(func, CHARACTERIZED_FUNCTIONS, full_traces_list)
+            fntype = characterize_func(CHARACTERIZED_FUNCTIONS, rows_for_function[func], max_req_per_sec,
+                                       min_req_per_sec, max_req_duration, min_req_duration)
             previouslyCharacterized[func] = fntype
 
         traces.append((fntype, row, end_timestamp))
 
+    return
+
 
 def calculate_avg_req_per_s(rows: list):
-    # Extract end timestamps and durations
-    end_timestamps = [row[2] for row in rows]
-    durations = [float(row[3]) * 1000 for row in rows]
+    # Create a DataFrame from the rows
+    df = pd.DataFrame(rows, columns=['app', 'func', 'end_timestamp', 'duration'])
+
+    # Convert 'duration' from string to float
+    df['duration'] = df['duration'].astype('float32')
+
+    # Convert duration to milliseconds
+    df['duration_ms'] = df['duration'] * 1000
+
+    # Calculate start times
+    df['start_timestamp'] = df['end_timestamp'] - pd.to_timedelta(df['duration_ms'], unit='ms')
 
     # Calculate total duration
-    total_duration = sum(durations)
+    total_duration = df['duration_ms'].sum()
 
-    # Find the time range
-    start_times = [end - timedelta(milliseconds=duration) for end, duration in zip(end_timestamps, durations)]
-    time_range: float = ((max(end_timestamps) - min(start_times)).total_seconds()) * 1000
+    # Calculate the time range in milliseconds
+    time_range = (df['end_timestamp'].max() - df['start_timestamp'].min()).total_seconds() * 1000
 
     # Calculate average requests per second
     avg_req_per_sec = total_duration / time_range if time_range > 0 else 0
@@ -74,47 +120,60 @@ def calculate_avg_req_per_s(rows: list):
 
 
 def calculate_avg_req_duration(rows: list):
-    return np.mean([row[3] * 1000 for row in rows])
+    # Convert just the durations to a NumPy array
+    durations = np.array([row[3] for row in rows])
 
+    # Multiply all durations by 1000 in a vectorized operation
+    durations_ms = durations * 1000
 
-def characterize_func(func: str, CHARACTERIZED_FUNCTIONS: dict, traces: list):
-    # Find all rows with the same function name
-    rows = [row for row in traces if row[1] == func]
+    # Calculate the mean using NumPy's mean function
+    return np.mean(durations_ms)
 
-    if len(rows) == 0:
-        raise Exception(f"Could not find any rows with function name {func}")
+def characterize_func(CHARACTERIZED_FUNCTIONS: dict, rows_for_function: list, max_req_per_sec: float, min_req_per_sec: float, max_req_duration: float, min_req_duration: float):
+    avg_req_per_sec: float = calculate_avg_req_per_s(rows_for_function)
+    avg_req_duration: float = calculate_avg_req_duration(rows_for_function)
 
-    avg_req_per_sec = calculate_avg_req_per_s(rows)
-    avg_req_duration = calculate_avg_req_duration(rows)
+    req_per_sec_range = max_req_per_sec - min_req_per_sec
+    req_duration_range = max_req_duration - min_req_duration
 
-    # Extract ranges for normalization
-    max_req_per_sec = max([characterization["characterization"]["avg_req_per_sec"] for characterization in
-                           CHARACTERIZED_FUNCTIONS.values()])
-    min_req_per_sec = min([characterization["characterization"]["avg_req_per_sec"] for characterization in
-                           CHARACTERIZED_FUNCTIONS.values()])
-    max_req_duration = max([characterization["characterization"]["avg_req_duration"] for characterization in
-                            CHARACTERIZED_FUNCTIONS.values()])
-    min_req_duration = min([characterization["characterization"]["avg_req_duration"] for characterization in
-                            CHARACTERIZED_FUNCTIONS.values()])
+    # Initialize normalized values
+    normalized_req_per_sec = 0
+    normalized_req_duration = 0
 
-    # Find the characterization that matches the closest
-    best_match = None
-    best_match_distance = float("inf")
+    # Normalize avg_req_per_sec, checking for division by zero
+    if req_per_sec_range != 0:
+        normalized_req_per_sec = (avg_req_per_sec - min_req_per_sec) / req_per_sec_range
 
-    for fntype, characterization in CHARACTERIZED_FUNCTIONS.items():
-        normalized_diff_req_per_sec = (characterization["characterization"]["avg_req_per_sec"] - avg_req_per_sec) / (
-                max_req_per_sec - min_req_per_sec) if max_req_per_sec != min_req_per_sec else 0
-        normalized_diff_req_duration = (characterization["characterization"]["avg_req_duration"] - avg_req_duration) / (
-                max_req_duration - min_req_duration) if max_req_duration != min_req_duration else 0
+    # Normalize avg_req_duration, checking for division by zero
+    if req_duration_range != 0:
+        normalized_req_duration = (avg_req_duration - min_req_duration) / req_duration_range
 
-        # Calculate the normalized distance
-        distance = abs(normalized_diff_req_per_sec) + abs(normalized_diff_req_duration)
+    normalized_metrics = np.array([normalized_req_per_sec, normalized_req_duration])
 
-        if distance < best_match_distance:
-            best_match = fntype
-            best_match_distance = distance
+    # Extract characteristics from CHARACTERIZED_FUNCTIONS and normalize them
+    characteristics = []
+    for char in CHARACTERIZED_FUNCTIONS.values():
+        char_avg_req_per_sec = char["characterization"]["avg_req_per_sec"]
+        char_avg_req_duration = char["characterization"]["avg_req_duration"]
 
-    return best_match
+        # Handle division by zero
+        normalized_char_req_per_sec = 0 if req_per_sec_range == 0 else (
+                                                                                   char_avg_req_per_sec - min_req_per_sec) / req_per_sec_range
+        normalized_char_req_duration = 0 if req_duration_range == 0 else (
+                                                                                     char_avg_req_duration - min_req_duration) / req_duration_range
+
+        characteristics.append([normalized_char_req_per_sec, normalized_char_req_duration])
+
+    characteristics = np.array(characteristics)
+
+    # Calculate Euclidean distances in a vectorized way
+    distances = np.linalg.norm(characteristics - normalized_metrics, axis=1)
+
+    # Find the index of the minimum distance
+    closest_match_idx = np.argmin(distances)
+
+    # Return the corresponding function type
+    return list(CHARACTERIZED_FUNCTIONS.keys())[closest_match_idx]
 
 
 def group_requests_by_time(queue, time_window_ms=10):
@@ -137,6 +196,7 @@ def group_requests_by_time(queue, time_window_ms=10):
     return grouped_requests
 
 
+@newrelic.agent.function_trace()
 def apply_arrival_policy(queue: deque, ARRIVAL_POLICY: str, CHARACTERIZED_FUNCTIONS: dict):
     grouped_requests = group_requests_by_time(queue, time_window_ms=10)
 
