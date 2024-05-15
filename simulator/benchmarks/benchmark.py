@@ -12,11 +12,13 @@ import itertools
 import multiprocessing
 from tqdm import tqdm
 
+
 def run_wrapped(input):
     newrelic.agent.register_application(timeout=10)
-    data=run_simulator(input)
+    data = run_simulator(input)
     newrelic.agent.shutdown_agent(10)
     return data
+
 
 @newrelic.agent.background_task(name="run_simulator")
 def run_simulator(input):
@@ -59,6 +61,7 @@ def run_simulator(input):
         "fpga_reconfigurations_per_node": metrics["fpga_reconfigurations_per_node"],
         "metrics_per_node_over_time": metrics["metrics_per_node_over_time"],
         "makespan": metrics["makespan"],
+        "latency": metrics["latency"],
         "max_requests": input["MAX_REQUESTS"],
         "num_nodes": input["NUM_NODES"],
         "function_keepalive": input["FUNCTION_KEEPALIVE"],
