@@ -12,8 +12,11 @@ pip freeze > requirements.txt
 
 ### download production traces
 
-Follow the instructions
-in [the Microsoft Azure traces repository](https://github.com/Azure/AzurePublicDataset/blob/master/AzureFunctionsInvocationTrace2021.md).
+```
+# run this in the simulator directory
+wget https://brunoscheufler.s3.eu-central-1.amazonaws.com/compressed
+tar -xvzf compressed
+```
 
 ### start on remote machine
 
