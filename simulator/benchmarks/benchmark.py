@@ -61,7 +61,7 @@ def run_simulator(input):
         "fpga_reconfigurations_per_node": metrics["fpga_reconfigurations_per_node"],
         "metrics_per_node_over_time": metrics["metrics_per_node_over_time"],
         "makespan": metrics["makespan"],
-        "latency": metrics["latency"],
+        "latencies": metrics["latencies"],
         "max_requests": input["MAX_REQUESTS"],
         "num_nodes": input["NUM_NODES"],
         "function_keepalive": input["FUNCTION_KEEPALIVE"],
