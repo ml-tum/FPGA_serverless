@@ -12,6 +12,8 @@ from pathlib import Path
 
 from benchmark import run_benchmark
 
+from data import characterized_collection
+
 from plot import (
     apply_aliases,
     catplot,
@@ -87,20 +89,7 @@ notAccelerated = {
 fullyAccelerated = {
     # strategy just refers to a list of characterized functions sourced from benchmarks
     "label": "Fully Accelerated",
-    "value": {
-        # these are characterized functions
-        1: {
-            # an average function that benefits somewhat from being on the FPGA
-            "label": "f1",
-            "mean_speedup": 1,  # 80% of original duration
-            "run_on_fpga": True,
-            "fpga_ratio": 1,
-            "characterization": {
-                "avg_req_per_sec": 1,
-                "avg_req_duration": 50,
-            }
-        },
-    }
+    "value": characterized_collection()
 }
 
 
