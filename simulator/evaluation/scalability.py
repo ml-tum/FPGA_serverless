@@ -168,7 +168,7 @@ def main() -> None:
     graph.despine()
     ##format(g.ax.xaxis, "useconds")
 
-    fname = "figure_scalability"
+    fname = "figure_scalability" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
 
 

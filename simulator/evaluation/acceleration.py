@@ -192,7 +192,7 @@ def main() -> None:
     graph.despine()
     ##format(g.ax.xaxis, "useconds")
 
-    fname = "figure_acceleration"
+    fname = "figure_acceleration" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
 
 
