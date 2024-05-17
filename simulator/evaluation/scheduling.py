@@ -128,18 +128,29 @@ def main() -> None:
     width = 3.3
     aspect = 1.2
 
+    # Assuming df is your original DataFrame
+    df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
+
+    # randomly sample 1000 latency values
+    # df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 100))
+
+    df_expanded = df.explode('latencies').reset_index(drop=True)
+    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
+
     graph = catplot(
-        data=df,
+        data=df_expanded,
         x="scheduler_weights",
-        y="makespan",
+        y="latencies",
+        hue="scheduler_weights",
         kind="box",
         errorbar="sd",
         height=width / aspect,
         aspect=aspect,
+        showfliers=False,
         # palette=[col_base, palette[1], palette[2]], # , col_base, palette[1], palette[2]
     )
 
-    graph.ax.set_ylabel("Makespan")
+    graph.ax.set_ylabel("Latency in ms")
     graph.ax.set_xlabel("Scheduler Weights")
 
     # graph.ax.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
