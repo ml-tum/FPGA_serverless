@@ -120,16 +120,22 @@ def main() -> None:
 
     df.rename(columns={"num_fpga_slots_per_node": "FPGA Slots per Node"}, inplace=True)
 
-    graph = catplot(
-        data=df,
+    # Assuming df is your original DataFrame
+    df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
+
+    df_expanded = df.explode('latencies').reset_index(drop=True)
+    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
+
+    # Create the boxplot
+    graph = sns.catplot(
+        data=df_expanded,
         x="nodes",
-        y="coldstart_percent",
+        y="latencies",
         hue="FPGA Slots per Node",
         kind="box",
-        errorbar="sd",
         height=width / aspect,
         aspect=aspect,
-        palette=[col_base, palette[1], palette[2]],  # , col_base, palette[1], palette[2]
+        palette=[col_base, palette[1], palette[2]]
     )
 
     graph.ax.set_ylabel("Percentage of Coldstarts")
