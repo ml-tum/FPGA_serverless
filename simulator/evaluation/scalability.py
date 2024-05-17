@@ -2,6 +2,8 @@ import os
 import json
 import sys
 
+import numpy as np
+
 sys.path.append("../")
 sys.path.append("../benchmarks")
 sys.path.append("../../miscs/evaluation/")
