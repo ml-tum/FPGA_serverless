@@ -123,6 +123,9 @@ def main() -> None:
     # Assuming df is your original DataFrame
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
+    # randomly sample 1000 latency values
+    df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 1000))
+
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
