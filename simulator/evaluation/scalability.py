@@ -126,7 +126,7 @@ def main() -> None:
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
     # randomly sample 1000 latency values
-    df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 1000))
+    # df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 100))
 
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
@@ -140,10 +140,11 @@ def main() -> None:
         kind="box",
         height=width / aspect,
         aspect=aspect,
-        palette=[col_base, palette[1], palette[2]]
+        palette=[col_base, palette[1], palette[2]],
+        showfliers=False
     )
 
-    graph.ax.set_ylabel("Percentage of Coldstarts")
+    graph.ax.set_ylabel("Latency in ms")
     graph.ax.set_xlabel("Number of Nodes")
 
     # graph.ax.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
