@@ -415,8 +415,8 @@ def process_row(
 
     # update metrics
     if is_function_placement:
-        metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS / 1000
-        time_to_add_to_latency += FUNCTION_HOST_COLDSTART_TIME_MS / 1000
+        metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS
+        time_to_add_to_latency += FUNCTION_HOST_COLDSTART_TIME_MS
         if metrics['function_placements_per_node'].get(deployed_on['id']) is None:
             metrics['function_placements_per_node'][deployed_on['id']] = [arrival_timestamp]
         else:

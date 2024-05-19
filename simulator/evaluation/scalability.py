@@ -74,7 +74,7 @@ def main() -> None:
         "NUM_NODES": [10, 100, 1000, 10_000],
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
         "FUNCTION_KEEPALIVE": [60],
-        "FPGA_RECONFIGURATION_TIME": [0.01],
+        "FPGA_RECONFIGURATION_TIME": [10],
         "NUM_FPGA_SLOTS_PER_NODE": [1, 2, 4],
         "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
 
