@@ -353,7 +353,6 @@ def process_row(
 
     req_id = f"{app}-{func}-{arrival_timestamp}"
     delay = (processing_start_timestamp - arrival_timestamp).total_seconds()
-    metrics['latencies'][req_id] = (arrival_timestamp, processing_start_timestamp, response_timestamp, duration, delay)
 
     def time_elapsed_since_previous_request(delta_seconds: int):
         return previous_request_timestamp['start'] is None or (
@@ -412,9 +411,12 @@ def process_row(
     if recently_used_nodes.get(deployed_on['id']) is None:
         recently_used_nodes[deployed_on['id']] = deployed_on
 
+    time_to_add_to_latency = 0
+
     # update metrics
     if is_function_placement:
         metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS / 1000
+        time_to_add_to_latency += FUNCTION_HOST_COLDSTART_TIME_MS / 1000
         if metrics['function_placements_per_node'].get(deployed_on['id']) is None:
             metrics['function_placements_per_node'][deployed_on['id']] = [arrival_timestamp]
         else:
@@ -453,6 +455,7 @@ def process_row(
 
         if needs_reconfiguration:
             metrics['makespan'] += FPGA_RECONFIGURATION_TIME
+            time_to_add_to_latency += FPGA_RECONFIGURATION_TIME
 
         if (FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement) or needs_reconfiguration:
             metrics['coldstarts'] += 1
@@ -466,6 +469,7 @@ def process_row(
     time_spent_on_fpga = fpga_ratio * duration
 
     metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2) / 1000
+    time_to_add_to_latency += round(time_spent_on_cpu + time_spent_on_fpga, 2) / 1000
 
     deployed_on['recent_baseline_utilization'].add(response_timestamp,
                                                    time_spent_on_cpu)  # TODO Check if this needs to run always
@@ -499,6 +503,8 @@ def process_row(
 
     # Immediately releasing means we have to coldstart for every request
     # release_fpga_slot(functions, nodes, deployed_on, function, end_timestamp, ENABLE_LOGS)
+
+    metrics['latencies'][req_id] = (arrival_timestamp, processing_start_timestamp, response_timestamp, time_to_add_to_latency, delay)
 
     return True
 
