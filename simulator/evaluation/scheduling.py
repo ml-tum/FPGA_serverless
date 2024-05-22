@@ -69,7 +69,7 @@ def main() -> None:
     maxRequests = os.getenv("MAX_REQUESTS", "1000")
     inputs = {
         "MAX_REQUESTS": [int(maxRequests)],
-        "NUM_NODES": [1000],
+        "NUM_NODES": [100, 1000],
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
         "FUNCTION_KEEPALIVE": [60],
         "FPGA_RECONFIGURATION_TIME": [10],
@@ -128,8 +128,23 @@ def main() -> None:
     width = 3.3
     aspect = 1.2
 
+    # scheduler weights are recorded in the weights shorthand format x-x-x
+    # we want to show human-readable labels:
+    # 1-2-2 should become "Prefer utilization", 0-1-1 should be "Utilization only" and 1-1-1 should be "Equal weights"
+    df["scheduler_weights"] = df["scheduler_weights"].apply(
+        lambda x:
+        "Prefer utilization" if x == "1-2-2" else
+        "Utilization only" if x == "0-1-1" else
+        "Equal weights" if x == "1-1-1" else
+        "Unknown"
+    )
+
     # Assuming df is your original DataFrame
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
+
+    # rename df["nodes"] to Nodes
+    df.rename(columns={"nodes": "Number of Nodes"}, inplace=True)
+
 
     # randomly sample 1000 latency values
     # df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 100))
@@ -141,17 +156,21 @@ def main() -> None:
         data=df_expanded,
         x="scheduler_weights",
         y="latencies",
-        hue="scheduler_weights",
+        hue="Number of Nodes",
         kind="box",
         errorbar="sd",
         height=width / aspect,
         aspect=aspect,
         showfliers=False,
-        # palette=[col_base, palette[1], palette[2]], # , col_base, palette[1], palette[2]
+        palette=[col_base, palette[1], palette[2]], # , col_base, palette[1], palette[2]
+        # increase distance between hue groups
+        dodge=True,
     )
 
     graph.ax.set_ylabel("Latency in ms")
     graph.ax.set_xlabel("Scheduler Weights")
+
+    graph.ax.set_xticklabels(df["scheduler_weights"], rotation=10)
 
     # graph.ax.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
     # hatches = ["//", "..", "//|", "..|"]
@@ -168,11 +187,12 @@ def main() -> None:
     graph.ax.annotate(
         "Lower is better",
         xycoords="axes points",
-        xy=(0, 0),
-        xytext=(-20, -27),
+        xy=(1, -55),
+        xytext=(-30, -37),
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",
+        arrowprops=dict(arrowstyle="-|>", color="navy"),
     )
     # graph.ax.annotate(
     #     "",

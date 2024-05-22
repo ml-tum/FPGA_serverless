@@ -162,11 +162,12 @@ def main() -> None:
     graph.ax.annotate(
         "Lower is better",
         xycoords="axes points",
-        xy=(0, 0),
+        xy=(0,0),
         xytext=(-20, -27),
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",
+        arrowprops=dict(arrowstyle="-|>", color="navy"),
     )
     # graph.ax.annotate(
     #     "",
