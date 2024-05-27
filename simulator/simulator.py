@@ -307,7 +307,7 @@ def process_row(
         FUNCTION_KEEPALIVE: float,
         NUM_FPGA_SLOTS_PER_NODE: int,
         ENABLE_LOGS: bool,
-        FPGA_RECONFIGURATION_TIME: float,
+        FPGA_RECONFIGURATION_TIME_MS: float,
         ENABLE_PROGRESS_LOGS: bool,
         RECENT_FPGA_USAGE_TIME_WEIGHT: float,
         RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT: float,
@@ -328,31 +328,36 @@ def process_row(
         return False
 
     # convert duration (seconds) to milliseconds
-    duration = duration * 1000
+    duration_ms = duration * 1000
 
     # get original start timestamp
-    arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration))
+    arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
 
     # adjust duration by expected acceleration
-    duration = duration / characterized_function["mean_speedup"]
+    duration_ms = duration_ms / characterized_function["mean_speedup"]
 
     # compute adjusted end timestamp
-    response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration))
+    response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration_ms))
 
+    # start with no latency (we ignore network-related latency)
+    invocation_latency = 0
+
+    # by default, requests start on arrival (if not waiting)
     processing_start_timestamp = arrival_timestamp
+    delay = 0
 
     # if request is waiting, it can only end after the previous request + its own duration
     request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
     if request_is_waiting:
-        waiting_time = (global_timer["time"] - arrival_timestamp).total_seconds()
-        metrics["makespan"] += waiting_time
+        processing_start_timestamp = global_timer["time"]  # start on earliest slot availability
+        delay = (processing_start_timestamp - arrival_timestamp).total_seconds() * 1000
+        metrics['makespan'] += delay
+        invocation_latency += delay
         # adjust end timestamp to account for waiting time
-        response_timestamp = global_timer["time"] + datetime.timedelta(milliseconds=float(
-            duration))  # could also write this as end_timestamp + datetime.timedelta(seconds=waiting_time)
-        processing_start_timestamp = global_timer["time"]
+        response_timestamp = processing_start_timestamp + datetime.timedelta(milliseconds=float(
+            duration_ms))  # could also write this as end_timestamp + datetime.timedelta(seconds=delay)
 
     req_id = f"{app}-{func}-{arrival_timestamp}"
-    delay = (processing_start_timestamp - arrival_timestamp).total_seconds()
 
     def time_elapsed_since_previous_request(delta_seconds: int):
         return previous_request_timestamp['start'] is None or (
@@ -382,7 +387,7 @@ def process_row(
     is_last_request = metrics['requests'] == MAX_REQUESTS
 
     metrics['requests'] += 1
-    metrics['request_duration'] += duration
+    metrics['request_duration'] += duration_ms
 
     # if ENABLE_LOGS:
     #     time_spent_since_previous_request = 0
@@ -411,12 +416,10 @@ def process_row(
     if recently_used_nodes.get(deployed_on['id']) is None:
         recently_used_nodes[deployed_on['id']] = deployed_on
 
-    time_to_add_to_latency = 0
-
     # update metrics
     if is_function_placement:
         metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS
-        time_to_add_to_latency += FUNCTION_HOST_COLDSTART_TIME_MS
+        invocation_latency += FUNCTION_HOST_COLDSTART_TIME_MS
         if metrics['function_placements_per_node'].get(deployed_on['id']) is None:
             metrics['function_placements_per_node'][deployed_on['id']] = [arrival_timestamp]
         else:
@@ -428,9 +431,9 @@ def process_row(
         metrics['requests_per_node'][deployed_on['id']] += 1
 
     if metrics['request_duration_per_node'].get(deployed_on['id']) is None:
-        metrics['request_duration_per_node'][deployed_on['id']] = duration
+        metrics['request_duration_per_node'][deployed_on['id']] = duration_ms
     else:
-        metrics['request_duration_per_node'][deployed_on['id']] += duration
+        metrics['request_duration_per_node'][deployed_on['id']] += duration_ms
 
     run_on_fpga = characterized_function["run_on_fpga"]
 
@@ -442,20 +445,17 @@ def process_row(
                                                                     processing_start_timestamp,
                                                                     response_timestamp, global_timer, add_to_wait,
                                                                     NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                                                                    FPGA_RECONFIGURATION_TIME)  # TODO Check if this needs to run always
+                                                                    FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
         else:
             needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
                                                                 processing_start_timestamp,
                                                                 response_timestamp, global_timer, add_to_wait,
                                                                 NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                                                                FPGA_RECONFIGURATION_TIME)  # TODO Check if this needs to run always
-
-        metrics['latencies'][req_id] = (
-            arrival_timestamp, processing_start_timestamp, response_timestamp, duration, delay, slot_key)
+                                                                FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
 
         if needs_reconfiguration:
-            metrics['makespan'] += FPGA_RECONFIGURATION_TIME
-            time_to_add_to_latency += FPGA_RECONFIGURATION_TIME
+            metrics['makespan'] += FPGA_RECONFIGURATION_TIME_MS
+            invocation_latency += FPGA_RECONFIGURATION_TIME_MS
 
         if (FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement) or needs_reconfiguration:
             metrics['coldstarts'] += 1
@@ -465,11 +465,11 @@ def process_row(
 
     # update utilization metrics
     fpga_ratio = characterized_function["fpga_ratio"] if run_on_fpga else 0
-    time_spent_on_cpu = (1 - fpga_ratio) * duration
-    time_spent_on_fpga = fpga_ratio * duration
+    time_spent_on_cpu = (1 - fpga_ratio) * duration_ms
+    time_spent_on_fpga = fpga_ratio * duration_ms
 
-    metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2) / 1000
-    time_to_add_to_latency += round(time_spent_on_cpu + time_spent_on_fpga, 2) / 1000
+    metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2)
+    invocation_latency += round(time_spent_on_cpu + time_spent_on_fpga, 2)
 
     deployed_on['recent_baseline_utilization'].add(response_timestamp,
                                                    time_spent_on_cpu)  # TODO Check if this needs to run always
@@ -504,7 +504,8 @@ def process_row(
     # Immediately releasing means we have to coldstart for every request
     # release_fpga_slot(functions, nodes, deployed_on, function, end_timestamp, ENABLE_LOGS)
 
-    metrics['latencies'][req_id] = (arrival_timestamp, processing_start_timestamp, response_timestamp, time_to_add_to_latency, delay)
+    metrics['latencies'][req_id] = (
+        arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
 
     return True
 
@@ -532,7 +533,7 @@ def run_on_file(
         CHARACTERIZED_FUNCTIONS=None,
 
         # system parameters
-        NUM_NODES=10, NUM_FPGA_SLOTS_PER_NODE=2, FPGA_RECONFIGURATION_TIME=0.01,
+        NUM_NODES=10, NUM_FPGA_SLOTS_PER_NODE=2, FPGA_RECONFIGURATION_TIME=10,
         FUNCTION_KEEPALIVE=60 * 60 * 12, MAX_REQUESTS=100_000, FUNCTION_HOST_COLDSTART_TIME_MS=100,
 
         # logging
@@ -551,6 +552,8 @@ def run_on_file(
         # if scale to zero is assumed, functions might have to be placed just in time, adding to the cold start
         FUNCTION_PLACEMENT_IS_COLDSTART=False
 ):
+    FPGA_RECONFIGURATION_TIME_MS = FPGA_RECONFIGURATION_TIME
+
     commitHash = os.getenv("COMMIT_HASH", "unknown")
 
     newrelic.agent.add_custom_attributes([
@@ -669,7 +672,7 @@ def run_on_file(
                     FUNCTION_KEEPALIVE,
                     NUM_FPGA_SLOTS_PER_NODE,
                     ENABLE_LOGS,
-                    FPGA_RECONFIGURATION_TIME,
+                    FPGA_RECONFIGURATION_TIME_MS,
                     ENABLE_PROGRESS_LOGS,
                     RECENT_FPGA_USAGE_TIME_WEIGHT,
                     RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
@@ -693,7 +696,7 @@ def run_on_file(
                 FUNCTION_KEEPALIVE,
                 NUM_FPGA_SLOTS_PER_NODE,
                 ENABLE_LOGS,
-                FPGA_RECONFIGURATION_TIME,
+                FPGA_RECONFIGURATION_TIME_MS,
                 ENABLE_PROGRESS_LOGS,
                 RECENT_FPGA_USAGE_TIME_WEIGHT,
                 RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,

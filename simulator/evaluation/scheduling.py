@@ -140,11 +140,11 @@ def main() -> None:
     )
 
     # Assuming df is your original DataFrame
+    # (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
     # rename df["nodes"] to Nodes
     df.rename(columns={"nodes": "Number of Nodes"}, inplace=True)
-
 
     # randomly sample 1000 latency values
     # df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 100))
@@ -162,7 +162,7 @@ def main() -> None:
         height=width / aspect,
         aspect=aspect,
         showfliers=False,
-        palette=[col_base, palette[1], palette[2]], # , col_base, palette[1], palette[2]
+        palette=[col_base, palette[1], palette[2]],  # , col_base, palette[1], palette[2]
         # increase distance between hue groups
         dodge=True,
     )
