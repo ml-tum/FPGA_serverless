@@ -62,14 +62,28 @@ else:
     out_format = ".png"
 
 palette = sns.color_palette("pastel")
-# palette = sns.color_palette("colorblind")
-# palette = [palette[-1], palette[1], palette[2]]
 col_base = palette[0]
 
 
 def main() -> None:
     maxRequests = os.getenv("MAX_REQUESTS", "1000")
     inputs = {
+        # The following metrics are available:
+        # METRICS_TO_RECORD = {
+        # "coldstarts", number of cold starts
+        # "makespan", total time spent on all computations and processing delays (waiting on slot to become available)
+        # "request_duration", # sum of all request durations (accounting for speedup)
+        # "fpga_reconfigurations_per_node", # map of all nodes, value is list of reconfiguration timestamps
+        # "fpga_usage_per_node", # map with entry for each node and sum of time spent on fpga on this node
+        # "requests_per_node", # number of requests per node
+        # "request_duration_per_node", # sum of all request durations per node
+        # "function_placements_per_node", # map of all nodes, value is list of function placement timestamps
+        # "metrics_per_node_over_time", #
+        # "latencies"
+        # }
+
+        "METRICS_TO_RECORD": [{"latencies"}],
+
         "MAX_REQUESTS": [int(maxRequests)],
         "NUM_NODES": [1, 10, 25, 50, 100, 150, 250, 500, 1000, 2500, 5000, 10_000],
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
@@ -125,9 +139,6 @@ def main() -> None:
     # Assuming df is your original DataFrame
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
-    # randomly sample 1000 latency values
-    # df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 100))
-
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
@@ -147,17 +158,6 @@ def main() -> None:
     graph.ax.set_ylabel("Latency in ms")
     graph.ax.set_xlabel("Number of Nodes")
 
-    # graph.ax.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
-    # hatches = ["//", "..", "//|", "..|"]
-    # hatches = ["", "|", "..", "..|"]
-    # apply_hatch(g, patch_legend=False, hatch_list=hatches)
-    ##annotate_bar_values_kB(g)
-    # graph._legend.remove()
-    ##graph._legend.set_title("")
-    ##sns.move_legend(g, "upper right", bbox_to_anchor=(0.77, 1.01), labelspacing=.2)
-    # graph.ax.set_xlim(0, 2500000)
-    ##graph.ax.set_xlim(0, 2800000)
-
     FONT_SIZE = 9
     graph.ax.annotate(
         "Lower is better",
@@ -169,17 +169,8 @@ def main() -> None:
         weight="bold",
         arrowprops=dict(arrowstyle="-|>", color="navy"),
     )
-    # graph.ax.annotate(
-    #     "",
-    #     xycoords="axes points",
-    #     xy=(-20-15, -25),
-    #     xytext=(-20, -25),
-    #     fontsize=FONT_SIZE,
-    #     arrowprops=dict(arrowstyle="-|>", color="navy"),
-    # )
 
     graph.despine()
-    ##format(g.ax.xaxis, "useconds")
 
     fname = "figure_scalability" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')

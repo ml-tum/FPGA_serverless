@@ -47,6 +47,8 @@ def run_simulator(input):
 
         ENABLE_PROGRESS_LOGS=os.getenv("ENABLE_PROGRESS_LOGS", False),
         ENABLE_LOGS=os.getenv("ENABLE_LOGS", False),
+
+        METRICS_TO_RECORD=input.get("METRICS_TO_RECORD", None),
     )
 
     return {
@@ -57,9 +59,9 @@ def run_simulator(input):
         "nodes": len(nodes),
         "apps": len(apps),
         "arrival_policy": input.get("ARRIVAL_POLICY", "FIFO"),
-        # "function_placements_per_node": metrics["function_placements_per_node"],
-        # "fpga_reconfigurations_per_node": metrics["fpga_reconfigurations_per_node"],
-        # "metrics_per_node_over_time": metrics["metrics_per_node_over_time"],
+        "function_placements_per_node": metrics["function_placements_per_node"],
+        "fpga_reconfigurations_per_node": metrics["fpga_reconfigurations_per_node"],
+        "metrics_per_node_over_time": metrics["metrics_per_node_over_time"],
         "makespan": metrics["makespan"],
         "latencies": metrics["latencies"],
         "max_requests": input["MAX_REQUESTS"],
