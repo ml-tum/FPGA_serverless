@@ -78,8 +78,8 @@ def main() -> None:
         # "requests_per_node", # number of requests per node
         # "request_duration_per_node", # sum of all request durations per node
         # "function_placements_per_node", # map of all nodes, value is list of function placement timestamps
-        # "metrics_per_node_over_time", #
-        # "latencies"
+        # "metrics_per_node_over_time", # utilization snapshots at different points in time
+        # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
         # }
 
         "METRICS_TO_RECORD": [{"latencies"}],
