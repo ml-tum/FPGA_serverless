@@ -71,7 +71,7 @@ def main() -> None:
     maxRequests = os.getenv("MAX_REQUESTS", "1000")
     inputs = {
         "MAX_REQUESTS": [int(maxRequests)],
-        "NUM_NODES": [10, 100, 1000, 10_000],
+        "NUM_NODES": [1, 10, 25, 50, 100, 150, 250, 500, 1000, 2500, 5000, 10_000],
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
         "FUNCTION_KEEPALIVE": [60],
         "FPGA_RECONFIGURATION_TIME": [10],
@@ -162,7 +162,7 @@ def main() -> None:
     graph.ax.annotate(
         "Lower is better",
         xycoords="axes points",
-        xy=(0,0),
+        xy=(0, 0),
         xytext=(-20, -27),
         fontsize=FONT_SIZE,
         color="navy",
