@@ -91,7 +91,7 @@ def decode_scheduler_weights(scheduler_weights):
 
 
 def run_benchmark(inputs):
-    num_processes = 8
+    num_processes = 4
 
     print(f"launching {num_processes} processes")
 
