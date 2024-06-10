@@ -7,6 +7,9 @@
 #include "hll.h"
 #include "../util/util.h"
 
+#define BUFSIZE (64*1024*1024)
+char buf[BUFSIZE];
+
 int main(int argc, char** argv) {
 
     hll_t h;
@@ -16,21 +19,22 @@ int main(int argc, char** argv) {
     assert(ret==0);
 
     int32_t value, count=0;
-    char buf[8];
+    char* ptr = buf;
     while(scanf("%d", &value) != EOF) {
-        count++;
-        measure_start();
+        assert(ptr+5 < buf+BUFSIZE);
         uint32_t x = value;
-        buf[0] = x&0xff;
-        buf[1] = (x>>8)&0xff;
-        buf[2] = (x>>16)&0xff;
-        buf[3] = (x>>24)&0xff;
-        buf[4] = 0;
-        hll_add(&h, (char*)&buf);
-        measure_end();
+        *(ptr++) = x&0xff;
+        *(ptr++) = (x>>8)&0xff;
+        *(ptr++) = (x>>16)&0xff;
+        *(ptr++) = (x>>24)&0xff;
+        *(ptr++) = 0;
+        count++;
     }
 
     measure_start();
+    for(int i=0; i<count; i++) {
+        hll_add(&h, buf+(i*5));
+    }
     double s = hll_size(&h);
     measure_end();
     measure_write("hyperloglog", "cpu", count*sizeof(uint32_t));
