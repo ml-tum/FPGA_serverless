@@ -449,6 +449,8 @@ def process_row(
             metrics['request_duration_per_node'][deployed_on['id']] += duration_ms
 
     run_on_fpga = characterized_function["run_on_fpga"]
+    if NUM_FPGA_SLOTS_PER_NODE == 0:
+        run_on_fpga = False
 
     if run_on_fpga:
         # keep processing request on fpga

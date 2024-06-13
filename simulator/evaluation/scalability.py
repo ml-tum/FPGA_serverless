@@ -89,7 +89,7 @@ def main() -> None:
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
         "FUNCTION_KEEPALIVE": [60],
         "FPGA_RECONFIGURATION_TIME": [10],
-        "NUM_FPGA_SLOTS_PER_NODE": [1, 2, 4],
+        "NUM_FPGA_SLOTS_PER_NODE": [0, 1, 2, 4],
         "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
 
         # TODO Use realistic values based on findings from microbenchmarks
