@@ -6,22 +6,13 @@ import unittest
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from evaluation.data import characterized_collection
 
 
 def group_and_plot(group_window_width_ms=1000):
     traces = preprocess.load_traces("../resampled.csv")
 
-    preprocess.characterize_traces({
-        "label": "strat2",
-        "value": {
-            "1": {
-                "fpga_ratio": 0.5,
-                "label": "f1",
-                "mean_speedup": 1,
-                "run_on_fpga": True
-            }
-        }
-    }, traces)
+    preprocess.characterize_traces(characterized_collection(), traces)
 
     grouped_requests = preprocess.group_requests_by_time(traces, time_window_ms=group_window_width_ms)
 

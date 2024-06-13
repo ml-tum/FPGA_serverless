@@ -218,6 +218,9 @@ def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER
 def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp, response_timestamp,
                       global_timer, add_to_wait,
                       NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME):
+    if NUM_FPGA_SLOTS_PER_NODE == 0:
+        return False, None
+
     # check if function is deployed on any FPGA slot, update last_invoked_at
     function = functions.get(functionName)
 
@@ -247,6 +250,9 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
                 global_timer["time"] = earliest_start_date
 
                 return None, None
+
+            if slot is None:
+                raise Exception("No slot found")
 
             # "evict" previous bitstream from node
             if slot["current_bitstream"] is not None:
