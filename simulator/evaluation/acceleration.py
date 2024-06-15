@@ -1,7 +1,8 @@
-import datetime
 import os
 import json
 import sys
+
+import numpy as np
 
 sys.path.append("../")
 sys.path.append("../benchmarks")
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from benchmark import run_benchmark
 
-from data import characterized_collection
+import datetime
 
 from plot import (
     apply_aliases,
@@ -32,7 +33,8 @@ from plot import (
 )
 from plot import ROW_ALIASES, COLUMN_ALIASES, FORMATTER
 
-# What we need to draw in this file :
+from data import characterized_collection, percentage_acceleration
+
 # - Figure~\ref{fig:acceleration} shows the results of this experiment
 #   (plot description: boxplot for each combination with makespan reported as a separate number).
 #   In this section, we evaluate the impact of accelerating a subset of the functions in a workload.
@@ -63,39 +65,52 @@ else:
     out_format = ".png"
 
 palette = sns.color_palette("pastel")
-# palette = sns.color_palette("colorblind")
-# palette = [palette[-1], palette[1], palette[2]]
 col_base = palette[0]
-
-notAccelerated = {
-    # strategy just refers to a list of characterized functions sourced from benchmarks
-    "label": "Not Accelerated",
-    "value": {
-        # these are characterized functions
-        1: {
-            # an average function that benefits somewhat from being on the FPGA
-            "label": "f1",
-            "mean_speedup": 1,  # 100% of original duration
-            "run_on_fpga": False,
-            "fpga_ratio": 0,
-            "characterization": {
-                "avg_req_per_sec": 1,
-                "avg_req_duration": 50,
-            }
-        },
-    }
-}
-
-fullyAccelerated = {
-    # strategy just refers to a list of characterized functions sourced from benchmarks
-    "label": "Fully Accelerated",
-    "value": characterized_collection()
-}
 
 
 def main() -> None:
     maxRequests = os.getenv("MAX_REQUESTS", "1000")
+
+    accelerations = [
+        {
+            "label": "0%",
+            "value": percentage_acceleration(0)
+        },
+        {
+            "label": "25%",
+            "value": percentage_acceleration(25)
+        },
+        {
+            "label": "50%",
+            "value": percentage_acceleration(50)
+        },
+        {
+            "label": "75%",
+            "value": percentage_acceleration(75)
+        },
+        {
+            "label": "100%",
+            "value": percentage_acceleration(100)
+        }
+    ]
+
     inputs = {
+        # The following metrics are available:
+        # METRICS_TO_RECORD = {
+        # "coldstarts", number of cold starts
+        # "makespan", total time spent on all computations and processing delays (waiting on slot to become available)
+        # "request_duration", # sum of all request durations (accounting for speedup)
+        # "fpga_reconfigurations_per_node", # map of all nodes, value is list of reconfiguration timestamps
+        # "fpga_usage_per_node", # map with entry for each node and sum of time spent on fpga on this node
+        # "requests_per_node", # number of requests per node
+        # "request_duration_per_node", # sum of all request durations per node
+        # "function_placements_per_node", # map of all nodes, value is list of function placement timestamps
+        # "metrics_per_node_over_time", # utilization snapshots at different points in time
+        # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
+        # }
+
+        "METRICS_TO_RECORD": [{"latencies"}],
+
         "MAX_REQUESTS": [int(maxRequests)],
         "NUM_NODES": [1000],
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
@@ -105,10 +120,7 @@ def main() -> None:
         "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
 
         # TODO Use realistic values based on findings from microbenchmarks
-        "CHARACTERIZED_FUNCTIONS": [
-            notAccelerated,
-            fullyAccelerated
-        ],
+        "CHARACTERIZED_FUNCTIONS": accelerations,
 
         # testing variables ceteris paribus:
         "SCHEDULER_WEIGHTS": [
@@ -140,35 +152,40 @@ def main() -> None:
 
     assert isinstance(df, pd.DataFrame)
 
-    # replace characterized_functions with characterized_functions.label
-    df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
-
     width = 3.3
     aspect = 1.2
 
-    graph = catplot(
-        data=df,
-        x="characterized_functions",
-        y="makespan",
-        kind="point",
-        errorbar="sd",
+    # replace characterized_functions with characterized_functions.label
+    df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
+
+    df.rename(columns={"characterized_functions": "Acceleration"}, inplace=True)
+
+    # convert acceleration to int
+    df["Acceleration"] = df["Acceleration"].apply(lambda x: int(x.replace("%", "")))
+
+    # Assuming df is your original DataFrame
+    df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
+
+    df_expanded = df.explode('latencies').reset_index(drop=True)
+    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
+
+    # Create the boxplot
+    graph = sns.catplot(
+        data=df_expanded,
+        x="Acceleration",
+        y="latencies",
+        kind="box",
         height=width / aspect,
         aspect=aspect,
-        linestyle="none",
-        # palette=[col_base, palette[1]], # , col_base, palette[1], palette[2]
+        palette=[col_base, palette[1], palette[2]],
+        showfliers=False
     )
-    graph.ax.set_ylabel("Makespan")
-    graph.ax.set_xlabel("Acceleration Strategy")
-    # graph.ax.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
-    # hatches = ["//", "..", "//|", "..|"]
-    # hatches = ["", "|", "..", "..|"]
-    # apply_hatch(g, patch_legend=False, hatch_list=hatches)
-    ##annotate_bar_values_kB(g)
-    # graph._legend.remove()
-    ##graph._legend.set_title("")
-    ##sns.move_legend(g, "upper right", bbox_to_anchor=(0.77, 1.01), labelspacing=.2)
-    # graph.ax.set_xlim(0, 2500000)
-    ##graph.ax.set_xlim(0, 2800000)
+
+    graph.ax.set_ylabel("Latency in ms")
+    graph.ax.set_xlabel("Acceleration")
+
+    # add percent sign to x-axis
+    graph.ax.set_xticklabels([f"{x}%" for x in range(0, 101, 25)])
 
     FONT_SIZE = 9
     graph.ax.annotate(
@@ -179,18 +196,10 @@ def main() -> None:
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",
+        arrowprops=dict(arrowstyle="-|>", color="navy"),
     )
-    # graph.ax.annotate(
-    #     "",
-    #     xycoords="axes points",
-    #     xy=(-20-15, -25),
-    #     xytext=(-20, -25),
-    #     fontsize=FONT_SIZE,
-    #     arrowprops=dict(arrowstyle="-|>", color="navy"),
-    # )
 
     graph.despine()
-    ##format(g.ax.xaxis, "useconds")
 
     fname = "figure_acceleration" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
