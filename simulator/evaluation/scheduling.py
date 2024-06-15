@@ -108,7 +108,9 @@ def main() -> None:
                 "RECENT_FPGA_USAGE_TIME_WEIGHT": 2,
                 "RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT": 2,
             }
-        ]
+        ],
+
+        "RECORD_PRIORITY_LATENCIES": [False, True],
     }
 
     run_on_file = os.getenv("PLOT_ON_RESULTS", "")
@@ -145,11 +147,18 @@ def main() -> None:
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
+    # Set label for record_priority_latencies, True should be "High Priority", False should be "All Priority"
+    df_expanded["record_priority_latencies"] = df_expanded["record_priority_latencies"].apply(
+        lambda x: "High Priority" if x else "All Priority"
+    )
+    df_expanded.rename(columns={"record_priority_latencies": "Priority"}, inplace=True)
+
     # Create the boxplot
     graph = sns.catplot(
         data=df_expanded,
         x="Arrival Policy",
         y="latencies",
+        hue="Priority",
         kind="box",
         height=width / aspect,
         aspect=aspect,

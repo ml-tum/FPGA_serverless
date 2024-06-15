@@ -334,6 +334,8 @@ def process_row(
         FUNCTION_PLACEMENT_IS_COLDSTART: bool,
         FUNCTION_HOST_COLDSTART_TIME_MS: float,
         METRICS_TO_RECORD: set,
+        RECORD_PRIORITY_LATENCIES: bool,
+        ARRIVAL_POLICY: str,
 ):
     app, func, response_timestamp, duration = row
 
@@ -542,7 +544,9 @@ def process_row(
     # Immediately releasing means we have to coldstart for every request
     # release_fpga_slot(functions, nodes, deployed_on, function, end_timestamp, ENABLE_LOGS)
 
-    if "latencies" in METRICS_TO_RECORD:
+    if "latencies" in METRICS_TO_RECORD and (
+            ARRIVAL_POLICY != "PRIORITY" or (
+            not RECORD_PRIORITY_LATENCIES or (RECORD_PRIORITY_LATENCIES and priority))):
         metrics['latencies'][req_id] = (
             arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
 
@@ -592,6 +596,8 @@ def run_on_file(
         FUNCTION_PLACEMENT_IS_COLDSTART=False,
 
         METRICS_TO_RECORD: set = None,
+
+        RECORD_PRIORITY_LATENCIES: bool = False
 ):
     if METRICS_TO_RECORD is None:
         METRICS_TO_RECORD = {"coldstarts", "makespan", "request_duration",
@@ -620,6 +626,8 @@ def run_on_file(
         ("ENABLE_PROGRESS_LOGS", ENABLE_PROGRESS_LOGS),
         ("ENABLE_PRINT_RESULTS", ENABLE_PRINT_RESULTS),
         ("FUNCTION_PLACEMENT_IS_COLDSTART", FUNCTION_PLACEMENT_IS_COLDSTART),
+        ("METRICS_TO_RECORD", METRICS_TO_RECORD),
+        ("RECORD_PRIORITY_LATENCIES", RECORD_PRIORITY_LATENCIES),
     ])
 
     # stable random seed for reproducibility
@@ -736,6 +744,8 @@ def run_on_file(
                     FUNCTION_PLACEMENT_IS_COLDSTART=FUNCTION_PLACEMENT_IS_COLDSTART,
                     FUNCTION_HOST_COLDSTART_TIME_MS=FUNCTION_HOST_COLDSTART_TIME_MS,
                     METRICS_TO_RECORD=METRICS_TO_RECORD,
+                    RECORD_PRIORITY_LATENCIES=RECORD_PRIORITY_LATENCIES,
+                    ARRIVAL_POLICY=ARRIVAL_POLICY
                 )
         else:
             res = process_row(
@@ -761,6 +771,8 @@ def run_on_file(
                 FUNCTION_PLACEMENT_IS_COLDSTART=FUNCTION_PLACEMENT_IS_COLDSTART,
                 FUNCTION_HOST_COLDSTART_TIME_MS=FUNCTION_HOST_COLDSTART_TIME_MS,
                 METRICS_TO_RECORD=METRICS_TO_RECORD,
+                RECORD_PRIORITY_LATENCIES=RECORD_PRIORITY_LATENCIES,
+                ARRIVAL_POLICY=ARRIVAL_POLICY
             )
 
         if res is False:

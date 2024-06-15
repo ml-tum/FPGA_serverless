@@ -49,6 +49,8 @@ def run_simulator(input):
         ENABLE_LOGS=os.getenv("ENABLE_LOGS", False),
 
         METRICS_TO_RECORD=input.get("METRICS_TO_RECORD", None),
+
+        RECORD_PRIORITY_LATENCIES=input.get("RECORD_PRIORITY_LATENCIES", False),
     )
 
     return {
@@ -59,6 +61,7 @@ def run_simulator(input):
         "nodes": len(nodes),
         "apps": len(apps),
         "arrival_policy": input.get("ARRIVAL_POLICY", "FIFO"),
+        "record_priority_latencies": input.get("RECORD_PRIORITY_LATENCIES", False),
         "function_placements_per_node": metrics["function_placements_per_node"],
         "fpga_reconfigurations_per_node": metrics["fpga_reconfigurations_per_node"],
         "metrics_per_node_over_time": metrics["metrics_per_node_over_time"],
