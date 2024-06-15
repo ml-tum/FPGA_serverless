@@ -33,7 +33,7 @@ def evict_inactive_functions(recently_used_nodes, functions, current_ts, FUNCTIO
     pass
 
 
-def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY:str="FIFO"):
+def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY: str = "FIFO"):
     nextId = len(nodes)
 
     slots = {}
@@ -218,7 +218,7 @@ def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER
 # acquire an FPGA slot for a function (place bitstream on node FPGA)
 def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp, response_timestamp,
                       priority,
-                      global_timer, add_to_wait, peek_queue,
+                      global_timer, add_to_wait,
                       NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME):
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         return False, None
@@ -238,6 +238,10 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
             earliest_start_date = None
             for slotIdx in node['fpga_slots']:
                 current_slot = node['fpga_slots'][slotIdx]
+
+                if priority and not current_slot['priority']:
+                    continue
+
                 if earliest_start_date is None or earliest_start_date > current_slot['earliest_start_date']:
                     slot = current_slot
                     slot_key = slotIdx
@@ -250,34 +254,6 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
 
                 # all requests must wait until earliest_start_date of the earliest available slot
                 global_timer["time"] = earliest_start_date
-
-                return None, None
-
-            # before starting to process, if there is a higher priority request within the processing time,
-            # enqueue the current requests up to this time and run the higher priority request first
-            continue_with_next_request = False
-            while True:
-                # if there's another request coming up
-                next_request = peek_queue()
-                if next_request is None:
-                    break
-
-                req, arrival_timestamp, response_timestamp, duration_ms, other_priority = next_request
-
-                if processing_start_timestamp > arrival_timestamp and processing_start_timesta
-
-                # and it has a higher priority
-                if other_priority > priority:
-                    # enqueue current event
-                    add_to_wait(req)
-
-                    continue_with_next_request = True
-
-                    # do not break here, instead try the next request in the queue
-
-            if continue_with_next_request:
-                # then enqueue the current request
-                add_to_wait()
 
                 return None, None
 
@@ -344,7 +320,6 @@ def process_row(
         global_timer: dict,
         add_to_wait: callable,
         row_is_traced: bool,
-        request_queue: deque,
 
         # run options
         MAX_REQUESTS: int,
@@ -494,30 +469,6 @@ def process_row(
         run_on_fpga = False
 
     if run_on_fpga:
-        def peek_queue():
-            req = request_queue.popleft()
-            if req is None:
-                return None
-
-            app, func, response_timestamp, duration = req[1]
-
-            duration = float(duration)
-            if duration < 0:
-                print("Invalid duration: {}".format(duration))
-                return None
-
-            duration_ms = duration * 1000
-            arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
-
-            duration_ms = duration_ms / characterized_function["mean_speedup"]
-
-            response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration_ms))
-
-            priority = characterized_function["priority"]
-
-            return (
-                req, arrival_timestamp, response_timestamp, duration_ms, priority)
-
         # keep processing request on fpga
         if row_is_traced:
             with newrelic.agent.FunctionTrace("acquire_fpga_slot"):
@@ -525,14 +476,12 @@ def process_row(
                                                                     processing_start_timestamp,
                                                                     response_timestamp, priority, global_timer,
                                                                     add_to_wait,
-                                                                    peek_queue,
                                                                     NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                                                                     FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
         else:
             needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
                                                                 processing_start_timestamp,
                                                                 response_timestamp, priority, global_timer, add_to_wait,
-                                                                peek_queue,
                                                                 NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                                                                 FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
 
@@ -775,7 +724,6 @@ def run_on_file(
                     previous_request_timestamp=previous_request_timestamp,
                     global_timer=global_timer,
                     add_to_wait=add_to_wait,
-                    request_queue=traces,
                     MAX_REQUESTS=MAX_REQUESTS,
                     FUNCTION_KEEPALIVE=FUNCTION_KEEPALIVE,
                     NUM_FPGA_SLOTS_PER_NODE=NUM_FPGA_SLOTS_PER_NODE,
@@ -801,7 +749,6 @@ def run_on_file(
                 previous_request_timestamp=previous_request_timestamp,
                 global_timer=global_timer,
                 add_to_wait=add_to_wait,
-                request_queue=traces,
                 MAX_REQUESTS=MAX_REQUESTS,
                 FUNCTION_KEEPALIVE=FUNCTION_KEEPALIVE,
                 NUM_FPGA_SLOTS_PER_NODE=NUM_FPGA_SLOTS_PER_NODE,

@@ -9,7 +9,7 @@ def addmul():
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.5,
         },
-        "priority": 3
+        "priority": True
     }
 
 
@@ -24,7 +24,7 @@ def aes128ecb4k():
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.5,
         },
-        "priority": 2
+        "priority": True
     }
 
 
@@ -39,7 +39,7 @@ def corner():
             "avg_req_per_sec": 1,
             "avg_req_duration": 120,
         },
-        "priority": 1
+        "priority": False
     }
 
 
@@ -54,7 +54,7 @@ def gzip():
             "avg_req_per_sec": 1,
             "avg_req_duration": 8,
         },
-        "priority": 1
+        "priority": False
     }
 
 
@@ -69,7 +69,7 @@ def hls4ml():
             "avg_req_per_sec": 1,
             "avg_req_duration": 1000,
         },
-        "priority": 3
+        "priority": True
     }
 
 
@@ -84,7 +84,7 @@ def hyperloglog():
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.7,
         },
-        "priority": 1
+        "priority": False
     }
 
 
@@ -99,7 +99,7 @@ def sha256():
             "avg_req_per_sec": 1,
             "avg_req_duration": 2,
         },
-        "priority": 1
+        "priority": False
     }
 
 
@@ -114,7 +114,7 @@ def sha3():
             "avg_req_per_sec": 1,
             "avg_req_duration": 5,
         },
-        "priority": 1
+        "priority": False
     }
 
 
@@ -129,7 +129,7 @@ def nw():
             "avg_req_per_sec": 1,
             "avg_req_duration": 1400,
         },
-        "priority": 1
+        "priority": False
     }
 
 

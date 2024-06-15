@@ -6,6 +6,7 @@ from csv import reader
 import numpy as np
 import pandas as pd
 
+
 def convert_end_timestamp_to_datetime(end_timestamp):
     custom_epoch = datetime(2021, 1, 31)
     unix_epoch = datetime(1970, 1, 1)
@@ -21,7 +22,7 @@ def load_traces(csv_file_path: str, MAX_REQUESTS: int = 0):
     queue = deque()
 
     # Read the CSV file in a streaming manner
-    num=0
+    num = 0
     with open(csv_file_path, 'r') as csv_file:
         csv_reader = reader(csv_file)
         next(csv_reader)  # Skip the header row
@@ -129,7 +130,9 @@ def calculate_avg_req_duration(rows: list):
     # Calculate the mean using NumPy's mean function
     return np.mean(durations_ms)
 
-def characterize_func(CHARACTERIZED_FUNCTIONS: dict, rows_for_function: list, max_req_per_sec: float, min_req_per_sec: float, max_req_duration: float, min_req_duration: float):
+
+def characterize_func(CHARACTERIZED_FUNCTIONS: dict, rows_for_function: list, max_req_per_sec: float,
+                      min_req_per_sec: float, max_req_duration: float, min_req_duration: float):
     avg_req_per_sec: float = calculate_avg_req_per_s(rows_for_function)
     avg_req_duration: float = calculate_avg_req_duration(rows_for_function)
 
@@ -158,9 +161,9 @@ def characterize_func(CHARACTERIZED_FUNCTIONS: dict, rows_for_function: list, ma
 
         # Handle division by zero
         normalized_char_req_per_sec = 0 if req_per_sec_range == 0 else (
-                                                                                   char_avg_req_per_sec - min_req_per_sec) / req_per_sec_range
+                                                                               char_avg_req_per_sec - min_req_per_sec) / req_per_sec_range
         normalized_char_req_duration = 0 if req_duration_range == 0 else (
-                                                                                     char_avg_req_duration - min_req_duration) / req_duration_range
+                                                                                 char_avg_req_duration - min_req_duration) / req_duration_range
 
         characteristics.append([normalized_char_req_per_sec, normalized_char_req_duration])
 
@@ -211,7 +214,7 @@ def apply_arrival_policy(queue: deque, ARRIVAL_POLICY: str, CHARACTERIZED_FUNCTI
 
         def sort_by_priority(request):
             fntype, row, end_timestamp = request
-            return CHARACTERIZED_FUNCTIONS[fntype]["priority"]
+            return 1 if CHARACTERIZED_FUNCTIONS[fntype]["priority"] else 0
 
         def sort_by_timestamp(request):
             fntype, row, end_timestamp = request

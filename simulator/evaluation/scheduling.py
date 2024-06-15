@@ -2,7 +2,7 @@ import os
 import json
 import sys
 
-from data import characterized_collection
+import numpy as np
 
 sys.path.append("../")
 sys.path.append("../benchmarks")
@@ -33,6 +33,8 @@ from plot import (
 )
 from plot import ROW_ALIASES, COLUMN_ALIASES, FORMATTER
 
+from data import characterized_collection
+
 # What we need to draw in this file :
 # - Figure~\ref{fig:scalability} shows latency boxplots for the scale-out experiment as we increase the number of machines from $1$ to $1,000$ and increase slots on each machine from $1$ to $4$
 #   (plot description: grouped boxplot of number of slots, increasing number of machines left to right).
@@ -60,30 +62,44 @@ else:
     out_format = ".png"
 
 palette = sns.color_palette("pastel")
-# palette = sns.color_palette("colorblind")
-# palette = [palette[-1], palette[1], palette[2]]
 col_base = palette[0]
 
 
 def main() -> None:
     maxRequests = os.getenv("MAX_REQUESTS", "1000")
+
     inputs = {
+        # The following metrics are available:
+        # METRICS_TO_RECORD = {
+        # "coldstarts", number of cold starts
+        # "makespan", total time spent on all computations and processing delays (waiting on slot to become available)
+        # "request_duration", # sum of all request durations (accounting for speedup)
+        # "fpga_reconfigurations_per_node", # map of all nodes, value is list of reconfiguration timestamps
+        # "fpga_usage_per_node", # map with entry for each node and sum of time spent on fpga on this node
+        # "requests_per_node", # number of requests per node
+        # "request_duration_per_node", # sum of all request durations per node
+        # "function_placements_per_node", # map of all nodes, value is list of function placement timestamps
+        # "metrics_per_node_over_time", # utilization snapshots at different points in time
+        # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
+        # }
+
+        "METRICS_TO_RECORD": [{"latencies"}],
+
+        "ARRIVAL_POLICY": ["FIFO", "PRIORITY"],
+
         "MAX_REQUESTS": [int(maxRequests)],
-        "NUM_NODES": [100, 1000],
+        "NUM_NODES": [1000],
         "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
         "FUNCTION_KEEPALIVE": [60],
         "FPGA_RECONFIGURATION_TIME": [10],
-        "NUM_FPGA_SLOTS_PER_NODE": [2],
+        "NUM_FPGA_SLOTS_PER_NODE": [4],
         "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
 
         # TODO Use realistic values based on findings from microbenchmarks
-        "CHARACTERIZED_FUNCTIONS": [
-            {
-                # strategy just refers to a list of characterized functions sourced from benchmarks
-                "label": "Characterized Functions",
-                "value": characterized_collection(),
-            }
-        ],
+        "CHARACTERIZED_FUNCTIONS": [{
+            "label": "Accelerated",
+            "value": characterized_collection(),
+        }],
 
         # testing variables ceteris paribus:
         "SCHEDULER_WEIGHTS": [
@@ -91,16 +107,6 @@ def main() -> None:
                 "FPGA_BITSTREAM_LOCALITY_WEIGHT": 1,
                 "RECENT_FPGA_USAGE_TIME_WEIGHT": 2,
                 "RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT": 2,
-            },
-            {
-                "FPGA_BITSTREAM_LOCALITY_WEIGHT": 1,
-                "RECENT_FPGA_USAGE_TIME_WEIGHT": 1,
-                "RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT": 1,
-            },
-            {
-                "FPGA_BITSTREAM_LOCALITY_WEIGHT": 0,
-                "RECENT_FPGA_USAGE_TIME_WEIGHT": 1,
-                "RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT": 1,
             }
         ]
     }
@@ -114,7 +120,7 @@ def main() -> None:
         print("starting benchmark")
 
         results = run_benchmark(inputs)
-        with open(f"scheduling_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json",
+        with open(f"acceleration_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json",
                   "w") as f:
             results_json = json.dumps(results, indent=4, sort_keys=True, default=str)
             f.write(results_json)
@@ -128,83 +134,45 @@ def main() -> None:
     width = 3.3
     aspect = 1.2
 
-    # scheduler weights are recorded in the weights shorthand format x-x-x
-    # we want to show human-readable labels:
-    # 1-2-2 should become "Prefer utilization", 0-1-1 should be "Utilization only" and 1-1-1 should be "Equal weights"
-    df["scheduler_weights"] = df["scheduler_weights"].apply(
-        lambda x:
-        "Prefer utilization" if x == "1-2-2" else
-        "Utilization only" if x == "0-1-1" else
-        "Equal weights" if x == "1-1-1" else
-        "Unknown"
-    )
+    # replace characterized_functions with characterized_functions.label
+    df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
+
+    df.rename(columns={"arrival_policy": "Arrival Policy"}, inplace=True)
 
     # Assuming df is your original DataFrame
-    # (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
-
-    # rename df["nodes"] to Nodes
-    df.rename(columns={"nodes": "Number of Nodes"}, inplace=True)
-
-    # randomly sample 1000 latency values
-    # df["latencies"] = df["latencies"].apply(lambda x: np.random.choice(x, 100))
 
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
-    graph = catplot(
+    # Create the boxplot
+    graph = sns.catplot(
         data=df_expanded,
-        x="scheduler_weights",
+        x="Arrival Policy",
         y="latencies",
-        hue="Number of Nodes",
         kind="box",
-        errorbar="sd",
         height=width / aspect,
         aspect=aspect,
-        showfliers=False,
-        palette=[col_base, palette[1], palette[2]],  # , col_base, palette[1], palette[2]
-        # increase distance between hue groups
-        dodge=True,
+        palette=[col_base, palette[1], palette[2]],
+        showfliers=False
     )
 
     graph.ax.set_ylabel("Latency in ms")
-    graph.ax.set_xlabel("Scheduler Weights")
-
-    graph.ax.set_xticklabels(df["scheduler_weights"], rotation=10)
-
-    # graph.ax.set_yticklabels(["AES", "GZIP", "SHA3", "NeWu"])
-    # hatches = ["//", "..", "//|", "..|"]
-    # hatches = ["", "|", "..", "..|"]
-    # apply_hatch(g, patch_legend=False, hatch_list=hatches)
-    ##annotate_bar_values_kB(g)
-    # graph._legend.remove()
-    ##graph._legend.set_title("")
-    ##sns.move_legend(g, "upper right", bbox_to_anchor=(0.77, 1.01), labelspacing=.2)
-    # graph.ax.set_xlim(0, 2500000)
-    ##graph.ax.set_xlim(0, 2800000)
+    graph.ax.set_xlabel("Arrival Policy")
 
     FONT_SIZE = 9
     graph.ax.annotate(
         "Lower is better",
         xycoords="axes points",
-        xy=(1, -55),
-        xytext=(-30, -37),
+        xy=(0, 0),
+        xytext=(-20, -27),
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",
         arrowprops=dict(arrowstyle="-|>", color="navy"),
     )
-    # graph.ax.annotate(
-    #     "",
-    #     xycoords="axes points",
-    #     xy=(-20-15, -25),
-    #     xytext=(-20, -25),
-    #     fontsize=FONT_SIZE,
-    #     arrowprops=dict(arrowstyle="-|>", color="navy"),
-    # )
 
     graph.despine()
-    ##format(g.ax.xaxis, "useconds")
 
     fname = "figure_scheduling" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
