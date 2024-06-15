@@ -8,7 +8,8 @@ def addmul():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.5,
-        }
+        },
+        "priority": 3
     }
 
 
@@ -22,7 +23,8 @@ def aes128ecb4k():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.5,
-        }
+        },
+        "priority": 2
     }
 
 
@@ -36,7 +38,8 @@ def corner():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 120,
-        }
+        },
+        "priority": 1
     }
 
 
@@ -50,7 +53,8 @@ def gzip():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 8,
-        }
+        },
+        "priority": 1
     }
 
 
@@ -64,7 +68,8 @@ def hls4ml():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 1000,
-        }
+        },
+        "priority": 3
     }
 
 
@@ -78,7 +83,8 @@ def hyperloglog():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.7,
-        }
+        },
+        "priority": 1
     }
 
 
@@ -92,7 +98,8 @@ def sha256():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 2,
-        }
+        },
+        "priority": 1
     }
 
 
@@ -106,7 +113,8 @@ def sha3():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 5,
-        }
+        },
+        "priority": 1
     }
 
 
@@ -120,7 +128,8 @@ def nw():
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 1400,
-        }
+        },
+        "priority": 1
     }
 
 

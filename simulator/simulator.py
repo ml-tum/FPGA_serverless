@@ -33,7 +33,7 @@ def evict_inactive_functions(recently_used_nodes, functions, current_ts, FUNCTIO
     pass
 
 
-def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2):
+def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY:str="FIFO"):
     nextId = len(nodes)
 
     slots = {}
@@ -41,6 +41,7 @@ def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2):
         slots[i] = {
             'current_bitstream': None,
             'earliest_start_date': None,
+            'priority': ARRIVAL_POLICY == "PRIORITY" and i == NUM_FPGA_SLOTS_PER_NODE - 1,
         }
 
     new_node = {
@@ -216,7 +217,8 @@ def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER
 
 # acquire an FPGA slot for a function (place bitstream on node FPGA)
 def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp, response_timestamp,
-                      global_timer, add_to_wait,
+                      priority,
+                      global_timer, add_to_wait, peek_queue,
                       NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME):
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         return False, None
@@ -248,6 +250,34 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
 
                 # all requests must wait until earliest_start_date of the earliest available slot
                 global_timer["time"] = earliest_start_date
+
+                return None, None
+
+            # before starting to process, if there is a higher priority request within the processing time,
+            # enqueue the current requests up to this time and run the higher priority request first
+            continue_with_next_request = False
+            while True:
+                # if there's another request coming up
+                next_request = peek_queue()
+                if next_request is None:
+                    break
+
+                req, arrival_timestamp, response_timestamp, duration_ms, other_priority = next_request
+
+                if processing_start_timestamp > arrival_timestamp and processing_start_timesta
+
+                # and it has a higher priority
+                if other_priority > priority:
+                    # enqueue current event
+                    add_to_wait(req)
+
+                    continue_with_next_request = True
+
+                    # do not break here, instead try the next request in the queue
+
+            if continue_with_next_request:
+                # then enqueue the current request
+                add_to_wait()
 
                 return None, None
 
@@ -314,6 +344,7 @@ def process_row(
         global_timer: dict,
         add_to_wait: callable,
         row_is_traced: bool,
+        request_queue: deque,
 
         # run options
         MAX_REQUESTS: int,
@@ -355,6 +386,10 @@ def process_row(
     # by default, requests start on arrival (if not waiting)
     processing_start_timestamp = arrival_timestamp
     delay = 0
+
+    priority = characterized_function["priority"]
+    if priority is None:
+        priority = 1
 
     # if request is waiting, it can only end after the previous request + its own duration
     request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
@@ -459,18 +494,45 @@ def process_row(
         run_on_fpga = False
 
     if run_on_fpga:
+        def peek_queue():
+            req = request_queue.popleft()
+            if req is None:
+                return None
+
+            app, func, response_timestamp, duration = req[1]
+
+            duration = float(duration)
+            if duration < 0:
+                print("Invalid duration: {}".format(duration))
+                return None
+
+            duration_ms = duration * 1000
+            arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
+
+            duration_ms = duration_ms / characterized_function["mean_speedup"]
+
+            response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration_ms))
+
+            priority = characterized_function["priority"]
+
+            return (
+                req, arrival_timestamp, response_timestamp, duration_ms, priority)
+
         # keep processing request on fpga
         if row_is_traced:
             with newrelic.agent.FunctionTrace("acquire_fpga_slot"):
                 needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
                                                                     processing_start_timestamp,
-                                                                    response_timestamp, global_timer, add_to_wait,
+                                                                    response_timestamp, priority, global_timer,
+                                                                    add_to_wait,
+                                                                    peek_queue,
                                                                     NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                                                                     FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
         else:
             needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
                                                                 processing_start_timestamp,
-                                                                response_timestamp, global_timer, add_to_wait,
+                                                                response_timestamp, priority, global_timer, add_to_wait,
+                                                                peek_queue,
                                                                 NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                                                                 FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
 
@@ -638,7 +700,7 @@ def run_on_file(
     }
 
     for i in range(NUM_NODES):
-        created_node = create_node(nodes, NUM_FPGA_SLOTS_PER_NODE)
+        created_node = create_node(nodes, NUM_FPGA_SLOTS_PER_NODE, ARRIVAL_POLICY)
 
         # initialize per-node metrics
         metrics['fpga_reconfigurations_per_node'][created_node['id']] = []
@@ -691,8 +753,11 @@ def run_on_file(
 
         characterized_function = CHARACTERIZED_FUNCTIONS.get(fntype)
 
-        def add_to_wait():
-            waiting.appendleft((fntype, row, end_timestamp))
+        def add_to_wait(req):
+            if req is not None:
+                waiting.appendleft(req)
+            else:
+                waiting.appendleft((fntype, row, end_timestamp))
 
         # every 0.2% of max requests, record function trace (so we end up with 500 traces)
         if num_traces > 500 and metrics['requests'] % (num_traces // 500) == 0:
@@ -710,6 +775,7 @@ def run_on_file(
                     previous_request_timestamp=previous_request_timestamp,
                     global_timer=global_timer,
                     add_to_wait=add_to_wait,
+                    request_queue=traces,
                     MAX_REQUESTS=MAX_REQUESTS,
                     FUNCTION_KEEPALIVE=FUNCTION_KEEPALIVE,
                     NUM_FPGA_SLOTS_PER_NODE=NUM_FPGA_SLOTS_PER_NODE,
@@ -735,6 +801,7 @@ def run_on_file(
                 previous_request_timestamp=previous_request_timestamp,
                 global_timer=global_timer,
                 add_to_wait=add_to_wait,
+                request_queue=traces,
                 MAX_REQUESTS=MAX_REQUESTS,
                 FUNCTION_KEEPALIVE=FUNCTION_KEEPALIVE,
                 NUM_FPGA_SLOTS_PER_NODE=NUM_FPGA_SLOTS_PER_NODE,
