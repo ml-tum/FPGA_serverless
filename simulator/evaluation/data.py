@@ -156,14 +156,15 @@ def fft():
 def characterized_collection():
     return {
         1: addmul(),
-        2: aes128ecb4k(),
-        3: corner(),
+        2: aes(),
+        3: sha3(),
         4: gzip(),
-        5: hls4ml(),
-        6: hyperloglog(),
-        7: sha256(),
-        8: sha3(),
-        9: nw(),
+        5: nw(),
+        6: hls4ml(),
+        7: hll(),
+        8: hcd(),
+        9: md5(),
+        10: fft(),
     }
 
 
