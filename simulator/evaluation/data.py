@@ -1,10 +1,24 @@
+# keep this in sync with https://docs.google.com/spreadsheets/d/18shhgdtzI6vHMJUNVPxkfVatAWoa31XTng-kzsvxwik
+# benchmark CPU     FPGA    speedup
+# ADDMUL	927.3	442.1	2.097
+# AES	34.6	188.8	0.183
+# SHA3	310.8	115.7	2.686
+# GZIP	1.212	368.8	3.286
+# NW	971.1	8.6	112.917
+# HLS4ML	1150	181.2	5.359
+# HLL	1296	224.9	5.763
+# HCD	146.9	64.8	2.267
+# MD5	11258	74.9	150.307
+# FFT	14.5	9.1	1.593
+# average	1611.0	167.9	28.6
+
+
 def addmul():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "addmul-1024",
-        "mean_speedup": 0.06,
+        "label": "addmul",
+        "mean_speedup": 2.097,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 442.1 / (927.3 + 442.1),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.5,
@@ -13,13 +27,12 @@ def addmul():
     }
 
 
-def aes128ecb4k():
+def aes():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "aes128ecb-1024kb",
-        "mean_speedup": 0.13,
+        "label": "aes",
+        "mean_speedup": 0.183,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 188.8 / (34.6 + 188.8),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.5,
@@ -28,13 +41,12 @@ def aes128ecb4k():
     }
 
 
-def corner():
+def sha3():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "corner-2025kb",
-        "mean_speedup": 10.41,
+        "label": "sha3",
+        "mean_speedup": 2.686,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 115.7 / (310.8 + 115.7),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 120,
@@ -45,11 +57,10 @@ def corner():
 
 def gzip():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "gzip-148kb",
-        "mean_speedup": 7.79,
+        "label": "gzip",
+        "mean_speedup": 3.286,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 368.8 / (1.212 + 368.8),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 8,
@@ -58,13 +69,12 @@ def gzip():
     }
 
 
-def hls4ml():
+def nw():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "hls4ml-3000kb",
-        "mean_speedup": 33.22,
+        "label": "nw",
+        "mean_speedup": 112.917,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 8.6 / (971.1 + 8.6),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 1000,
@@ -73,13 +83,12 @@ def hls4ml():
     }
 
 
-def hyperloglog():
+def hls4ml():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "hyperloglog-4kb",
-        "mean_speedup": 1.94,
+        "label": "hls4ml",
+        "mean_speedup": 5.359,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 181.2 / (1150 + 181.2),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 0.7,
@@ -88,13 +97,12 @@ def hyperloglog():
     }
 
 
-def sha256():
+def hll():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "sha256-1024kb",
-        "mean_speedup": 0.42,
+        "label": "hll",
+        "mean_speedup": 5.763,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 224.9 / (1296 + 224.9),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 2,
@@ -103,13 +111,12 @@ def sha256():
     }
 
 
-def sha3():
+def hcd():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "sha3-1024",
-        "mean_speedup": 1.15,
+        "label": "hcd",
+        "mean_speedup": 2.267,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 64.8 / (146.9 + 64.8),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 5,
@@ -118,13 +125,26 @@ def sha3():
     }
 
 
-def nw():
+def md5():
     return {
-        # an average function that benefits somewhat from being on the FPGA
-        "label": "nw-8kb",
-        "mean_speedup": 1822.22,
+        "label": "md5",
+        "mean_speedup": 150.307,
         "run_on_fpga": True,
-        "fpga_ratio": 0.5,
+        "fpga_ratio": 74.9 / (11258 + 74.9),
+        "characterization": {
+            "avg_req_per_sec": 1,
+            "avg_req_duration": 1400,
+        },
+        "priority": False
+    }
+
+
+def fft():
+    return {
+        "label": "fft",
+        "mean_speedup": 1.593,
+        "run_on_fpga": True,
+        "fpga_ratio": 9.1 / (14.5 + 9.1),
         "characterization": {
             "avg_req_per_sec": 1,
             "avg_req_duration": 1400,
