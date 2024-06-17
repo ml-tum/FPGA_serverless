@@ -260,7 +260,7 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
                 return None, None
 
             if slot is None:
-                raise Exception("No slot found")
+                raise Exception(f"No slot found for priority {priority}")
 
             # "evict" previous bitstream from node
             if slot["current_bitstream"] is not None:
@@ -372,6 +372,10 @@ def process_row(
     priority = False
     if ARRIVAL_POLICY == "PRIORITY" and characterized_function["priority"]:
         priority = characterized_function["priority"]
+        # if priority is number and not 0, set to true
+        if isinstance(priority, (int, float)):
+            print(f"Warning: Priority should be supplied as boolean value")
+            priority = priority != 0
 
     # if request is waiting, it can only end after the previous request + its own duration
     request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
