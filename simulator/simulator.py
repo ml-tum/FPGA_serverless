@@ -233,16 +233,18 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
     needs_reconfiguration = functionName not in node['bitstreams']
     if needs_reconfiguration:
         # If all slots are occupied
-        if len(node['bitstreams']) >= NUM_FPGA_SLOTS_PER_NODE:
+        allOccupied = len(node['bitstreams']) >= NUM_FPGA_SLOTS_PER_NODE
+        if allOccupied:
             # Find slot with earliest done date
             earliest_start_date = None
             for slotIdx in node['fpga_slots']:
                 current_slot = node['fpga_slots'][slotIdx]
 
-                if priority and not current_slot['priority']:
+                if priority != current_slot['priority']:
                     continue
 
-                if earliest_start_date is None or earliest_start_date > current_slot['earliest_start_date']:
+                if earliest_start_date is None or current_slot['earliest_start_date'] is None or current_slot[
+                    'earliest_start_date'] < earliest_start_date:
                     slot = current_slot
                     slot_key = slotIdx
                     earliest_start_date = current_slot['earliest_start_date']
@@ -268,6 +270,9 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
         else:
             # Find empty slot
             for slotIdx in node['fpga_slots']:
+                if priority != node['fpga_slots'][slotIdx]['priority']:
+                    continue
+
                 if node['fpga_slots'][slotIdx]['current_bitstream'] is None:
                     slot = node['fpga_slots'][slotIdx]
                     slot_key = slotIdx
@@ -364,9 +369,9 @@ def process_row(
     processing_start_timestamp = arrival_timestamp
     delay = 0
 
-    priority = characterized_function["priority"]
-    if priority is None:
-        priority = 1
+    priority = False
+    if ARRIVAL_POLICY == "PRIORITY" and characterized_function["priority"]:
+        priority = characterized_function["priority"]
 
     # if request is waiting, it can only end after the previous request + its own duration
     request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
@@ -710,11 +715,8 @@ def run_on_file(
 
         characterized_function = CHARACTERIZED_FUNCTIONS.get(fntype)
 
-        def add_to_wait(req):
-            if req is not None:
-                waiting.appendleft(req)
-            else:
-                waiting.appendleft((fntype, row, end_timestamp))
+        def add_to_wait():
+            waiting.appendleft((fntype, row, end_timestamp))
 
         # every 0.2% of max requests, record function trace (so we end up with 500 traces)
         if num_traces > 500 and metrics['requests'] % (num_traces // 500) == 0:

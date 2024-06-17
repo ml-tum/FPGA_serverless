@@ -83,7 +83,7 @@ def main() -> None:
         # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
         # }
 
-        "METRICS_TO_RECORD": [{"latencies"}],
+        "METRICS_TO_RECORD": [{"latencies", "makespan"}],
 
         "ARRIVAL_POLICY": ["FIFO", "PRIORITY"],
 
@@ -140,18 +140,18 @@ def main() -> None:
     df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
 
     df.rename(columns={"arrival_policy": "Arrival Policy"}, inplace=True)
+    df.rename(columns={"record_priority_latencies": "Priority"}, inplace=True)
+
+    # Set label for record_priority_latencies, True should be "High Priority", False should be "All Priority"
+    df["Priority"] = df["Priority"].apply(
+        lambda x: "High Priority" if x else "All Priority"
+    )
 
     # Assuming df is your original DataFrame
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
-
-    # Set label for record_priority_latencies, True should be "High Priority", False should be "All Priority"
-    df_expanded["record_priority_latencies"] = df_expanded["record_priority_latencies"].apply(
-        lambda x: "High Priority" if x else "All Priority"
-    )
-    df_expanded.rename(columns={"record_priority_latencies": "Priority"}, inplace=True)
 
     # Create the boxplot
     graph = sns.catplot(
@@ -185,6 +185,9 @@ def main() -> None:
 
     fname = "figure_scheduling" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
+
+    # log number of nodes, fpga slots per node and makespan to csv, ignore other columns
+    df[["Arrival Policy", "Priority", "makespan"]].to_csv("makespan_scheduling.csv", index=False)
 
 
 if __name__ == "__main__":

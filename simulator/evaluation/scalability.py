@@ -82,7 +82,7 @@ def main() -> None:
         # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
         # }
 
-        "METRICS_TO_RECORD": [{"latencies"}],
+        "METRICS_TO_RECORD": [{"latencies", "makespan"}],
 
         "MAX_REQUESTS": [int(maxRequests)],
         "NUM_NODES": [1, 10, 25, 50, 100, 150, 250, 500, 1000, 2500, 5000, 10_000],
@@ -174,6 +174,9 @@ def main() -> None:
 
     fname = "figure_scalability" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
+
+    # log number of nodes, fpga slots per node and makespan to csv, ignore other columns
+    df[["nodes", "FPGA Slots per Node", "makespan"]].to_csv("makespan_scalability.csv", index=False)
 
 
 if __name__ == "__main__":

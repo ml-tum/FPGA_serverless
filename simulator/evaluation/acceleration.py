@@ -109,7 +109,7 @@ def main() -> None:
         # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
         # }
 
-        "METRICS_TO_RECORD": [{"latencies"}],
+        "METRICS_TO_RECORD": [{"latencies", "makespan"}],
 
         "MAX_REQUESTS": [int(maxRequests)],
         "NUM_NODES": [1000],
@@ -203,6 +203,9 @@ def main() -> None:
 
     fname = "figure_acceleration" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
+
+    # log acceleration and makespan to csv, ignore other columns
+    df[["Acceleration", "makespan"]].to_csv("makespan_acceleration.csv", index=False)
 
 
 if __name__ == "__main__":
