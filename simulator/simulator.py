@@ -41,8 +41,12 @@ def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY: str = "F
         slots[i] = {
             'current_bitstream': None,
             'earliest_start_date': None,
-            'priority': ARRIVAL_POLICY == "PRIORITY" and i == NUM_FPGA_SLOTS_PER_NODE - 1,
+            'priority': (ARRIVAL_POLICY == "PRIORITY") and (i == (NUM_FPGA_SLOTS_PER_NODE - 1)),
         }
+
+        # sanity check slots[i]["priority"] is boolean value
+        if not isinstance(slots[i]["priority"], bool):
+            raise Exception(f"Slot Priority should be supplied as boolean value")
 
     new_node = {
         'id': nextId,
