@@ -48,6 +48,13 @@ def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY: str = "F
         if not isinstance(slots[i]["priority"], bool):
             raise Exception(f"Slot Priority should be supplied as boolean value")
 
+    # sanity check: if ARRIVAL_POLICY = "PRIORITY", there must be at least one slot with priority = True and at least one slot with priority = False
+    if ARRIVAL_POLICY == "PRIORITY":
+        if not any(slot["priority"] for slot in slots.values()):
+            raise Exception(f"ARRIVAL_POLICY = 'PRIORITY' requires at least one slot with priority = True")
+        if not any(not slot["priority"] for slot in slots.values()):
+            raise Exception(f"ARRIVAL_POLICY = 'PRIORITY' requires at least one slot with priority = False")
+
     new_node = {
         'id': nextId,
         'functions': set(),
@@ -233,84 +240,79 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
     slot = None
     slot_key = None
 
-    # otherwise deploy
+    earliest_start_date = None
+
     needs_reconfiguration = functionName not in node['bitstreams']
+
+    for slotIdx in node['fpga_slots']:
+        current_slot = node['fpga_slots'][slotIdx]
+
+        # if we have a slot with a matching bitstream, pick that
+        if not needs_reconfiguration:
+            if current_slot['current_bitstream'] != functionName:
+                continue
+
+            slot_key = slotIdx
+            slot = current_slot
+            break
+
+        # otherwise the priority must match
+        if priority != current_slot['priority']:
+            continue
+
+        # and then it must be empty
+        if current_slot['current_bitstream'] is None:
+            slot = current_slot
+            slot_key = slotIdx
+            break
+
+        # or at least not working
+        if earliest_start_date is None or current_slot['earliest_start_date'] is None:
+            slot = current_slot
+            slot_key = slotIdx
+            earliest_start_date = current_slot['earliest_start_date']
+
+        # or having completed its work before
+        if current_slot['earliest_start_date'] < earliest_start_date:
+            slot = current_slot
+            slot_key = slotIdx
+            earliest_start_date = current_slot['earliest_start_date']
+
+    if slot is None:
+        raise Exception(f"No slot found for priority {priority}")
+
     if needs_reconfiguration:
-        # If all slots are occupied
-        allOccupied = len(node['bitstreams']) >= NUM_FPGA_SLOTS_PER_NODE
-        if allOccupied:
-            # Find slot with earliest done date
-            earliest_start_date = None
-            for slotIdx in node['fpga_slots']:
-                current_slot = node['fpga_slots'][slotIdx]
+        # If slot is not available at current time, wait until it is
+        can_run_on_slot = earliest_start_date is None or earliest_start_date <= processing_start_timestamp
+        if not can_run_on_slot:
+            add_to_wait()
 
-                if priority != current_slot['priority']:
-                    continue
+            # all requests must wait until earliest_start_date of the earliest available slot
+            global_timer["time"] = earliest_start_date
 
-                if earliest_start_date is None or current_slot['earliest_start_date'] is None or current_slot[
-                    'earliest_start_date'] < earliest_start_date:
-                    slot = current_slot
-                    slot_key = slotIdx
-                    earliest_start_date = current_slot['earliest_start_date']
+            # can't do any work yet, so we'll return and let the slot "run"
+            return None, None
 
-            # If slot is not available at current time, wait until it is
-            can_run_on_slot = earliest_start_date is None or earliest_start_date <= processing_start_timestamp
-            if not can_run_on_slot:
-                add_to_wait()
-
-                # all requests must wait until earliest_start_date of the earliest available slot
-                global_timer["time"] = earliest_start_date
-
-                return None, None
-
-            if slot is None:
-                raise Exception(f"No slot found for priority {priority}")
-
-            # "evict" previous bitstream from node
-            if slot["current_bitstream"] is not None:
-                node["bitstreams"].remove(slot["current_bitstream"])
-                slot["current_bitstream"] = None
+        if slot['current_bitstream'] is not None:
+            node["bitstreams"].remove(slot["current_bitstream"])
+            slot["current_bitstream"] = None
             slot["earliest_start_date"] = None
-        else:
-            # Find empty slot
-            for slotIdx in node['fpga_slots']:
-                if priority != node['fpga_slots'][slotIdx]['priority']:
-                    continue
 
-                if node['fpga_slots'][slotIdx]['current_bitstream'] is None:
-                    slot = node['fpga_slots'][slotIdx]
-                    slot_key = slotIdx
-                    break
+    # deploy function on next best FPGA slot
+    node['bitstreams'].add(functionName)
 
-        # deploy function on next best FPGA slot
-        node['bitstreams'].add(functionName)
-        function['bitstream_started_at'] = processing_start_timestamp
-        slot['current_bitstream'] = functionName
-        slot['earliest_start_date'] = response_timestamp
+    function['bitstream_started_at'] = processing_start_timestamp
+    slot['current_bitstream'] = functionName
+    slot['earliest_start_date'] = response_timestamp
 
-        # coldstart if bitstream was not placed on this FPGA before
-        # if ENABLE_LOGS:
-        #     print("Added bitstream: {}, now at {}/{}: {}".format(functionName, len(node['bitstreams']),
-        #                                                          NUM_FPGA_SLOTS_PER_NODE, node['bitstreams']))
-
-        if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:
-            metrics['fpga_reconfigurations_per_node'][node['id']] = [processing_start_timestamp]
-        else:
-            metrics['fpga_reconfigurations_per_node'][node['id']].append(processing_start_timestamp)
-
-        node['recent_fpga_reconfiguration_count'].add(response_timestamp, 1)
-        node['recent_fpga_reconfiguration_time'].add(response_timestamp, FPGA_RECONFIGURATION_TIME)
-
-        # if ENABLE_LOGS:
-        #     print("Coldstart for function {}, total {}".format(functionName, metrics['coldstarts']))
+    if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:
+        metrics['fpga_reconfigurations_per_node'][node['id']] = [processing_start_timestamp]
     else:
-        # find slot
-        for slotIdx in node['fpga_slots']:
-            if node['fpga_slots'][slotIdx]['current_bitstream'] == functionName:
-                slot_key = slotIdx
-                break
+        metrics['fpga_reconfigurations_per_node'][node['id']].append(processing_start_timestamp)
 
-    function['bitstream_last_invoked_at'] = response_timestamp
+    node['recent_fpga_reconfiguration_count'].add(response_timestamp, 1)
+    node['recent_fpga_reconfiguration_time'].add(response_timestamp, FPGA_RECONFIGURATION_TIME)
+
     nodes[node['id']] = node
 
     return needs_reconfiguration, slot_key
@@ -377,7 +379,7 @@ def process_row(
     if ARRIVAL_POLICY == "PRIORITY" and characterized_function["priority"]:
         priority = characterized_function["priority"]
         # if priority is number and not 0, set to true
-        if isinstance(priority, (int, float)):
+        if not isinstance(priority, bool):
             print(f"Warning: Priority should be supplied as boolean value")
             priority = priority != 0
 
