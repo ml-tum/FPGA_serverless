@@ -171,14 +171,13 @@ def main() -> None:
 
     FONT_SIZE = 9
     graph.ax.annotate(
-        "Lower is better",
+        "↓ Lower is better",
         xycoords="axes points",
         xy=(0, 0),
-        xytext=(-20, -27),
+        xytext=(-50, -10),
         fontsize=FONT_SIZE,
         color="navy",
-        weight="bold",
-        arrowprops=dict(arrowstyle="-|>", color="navy"),
+        weight="bold"
     )
 
     graph.despine()
