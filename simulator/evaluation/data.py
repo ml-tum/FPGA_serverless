@@ -166,18 +166,3 @@ def characterized_collection():
         9: md5(),
         10: fft(),
     }
-
-
-def percentage_acceleration(percentage: float):
-    # scales mean_speedup by percentage
-
-    values = characterized_collection()
-    for key in values:
-        if values[key]["mean_speedup"] >= 1:
-            values[key]["mean_speedup"] = values[key]["mean_speedup"] * percentage
-            if values[key]["mean_speedup"] < 1:
-                values[key]["mean_speedup"] = 1
-        else:
-            values[key]["mean_speedup"] = values[key]["mean_speedup"]
-
-    return values

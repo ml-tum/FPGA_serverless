@@ -33,7 +33,7 @@ from plot import (
 )
 from plot import ROW_ALIASES, COLUMN_ALIASES, FORMATTER
 
-from data import characterized_collection, percentage_acceleration
+from data import characterized_collection
 
 # - Figure~\ref{fig:acceleration} shows the results of this experiment
 #   (plot description: boxplot for each combination with makespan reported as a separate number).
@@ -71,29 +71,6 @@ col_base = palette[0]
 def main() -> None:
     maxRequests = os.getenv("MAX_REQUESTS", "1000")
 
-    accelerations = [
-        {
-            "label": "0%",
-            "value": percentage_acceleration(0)
-        },
-        {
-            "label": "25%",
-            "value": percentage_acceleration(25)
-        },
-        {
-            "label": "50%",
-            "value": percentage_acceleration(50)
-        },
-        {
-            "label": "75%",
-            "value": percentage_acceleration(75)
-        },
-        {
-            "label": "100%",
-            "value": percentage_acceleration(100)
-        }
-    ]
-
     inputs = {
         # The following metrics are available:
         # METRICS_TO_RECORD = {
@@ -120,7 +97,20 @@ def main() -> None:
         "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
 
         # TODO Use realistic values based on findings from microbenchmarks
-        "CHARACTERIZED_FUNCTIONS": accelerations,
+        "CHARACTERIZED_FUNCTIONS": [
+            {
+                "label": "Characterized Functions",
+                "value": characterized_collection()
+            }
+        ],
+
+        "ACCELERATE_REQUESTS": [
+            0,
+            0.25,
+            0.5,
+            0.75,
+            1
+        ],
 
         # testing variables ceteris paribus:
         "SCHEDULER_WEIGHTS": [
@@ -158,10 +148,7 @@ def main() -> None:
     # replace characterized_functions with characterized_functions.label
     df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
 
-    df.rename(columns={"characterized_functions": "Acceleration"}, inplace=True)
-
-    # convert acceleration to int
-    df["Acceleration"] = df["Acceleration"].apply(lambda x: int(x.replace("%", "")))
+    df.rename(columns={"accelerate_requests": "Acceleration"}, inplace=True)
 
     # Assuming df is your original DataFrame
     df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])

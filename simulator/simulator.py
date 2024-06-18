@@ -347,6 +347,7 @@ def process_row(
         METRICS_TO_RECORD: set,
         RECORD_PRIORITY_LATENCIES: bool,
         ARRIVAL_POLICY: str,
+        ACCELERATE_REQUESTS: float
 ):
     app, func, response_timestamp, duration = row
 
@@ -362,8 +363,12 @@ def process_row(
     # get original start timestamp
     arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
 
+    # ACCELERATE_REQUESTS is a probability between 0 and 1, generate the chance we should accelerate this request
+    should_accelerate = random.random() < ACCELERATE_REQUESTS
+
     # adjust duration by expected acceleration
-    duration_ms = duration_ms / characterized_function["mean_speedup"]
+    if should_accelerate:
+        duration_ms = duration_ms / characterized_function["mean_speedup"]
 
     # compute adjusted end timestamp
     response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration_ms))
@@ -481,7 +486,7 @@ def process_row(
         else:
             metrics['request_duration_per_node'][deployed_on['id']] += duration_ms
 
-    run_on_fpga = characterized_function["run_on_fpga"]
+    run_on_fpga = characterized_function["run_on_fpga"] and should_accelerate
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         run_on_fpga = False
 
@@ -612,7 +617,9 @@ def run_on_file(
 
         METRICS_TO_RECORD: set = None,
 
-        RECORD_PRIORITY_LATENCIES: bool = False
+        RECORD_PRIORITY_LATENCIES: bool = False,
+
+        ACCELERATE_REQUESTS: float = 0
 ):
     if METRICS_TO_RECORD is None:
         METRICS_TO_RECORD = {"coldstarts", "makespan", "request_duration",
@@ -643,6 +650,7 @@ def run_on_file(
         ("FUNCTION_PLACEMENT_IS_COLDSTART", FUNCTION_PLACEMENT_IS_COLDSTART),
         ("METRICS_TO_RECORD", METRICS_TO_RECORD),
         ("RECORD_PRIORITY_LATENCIES", RECORD_PRIORITY_LATENCIES),
+        ("ACCELERATE_REQUESTS", ACCELERATE_REQUESTS),
     ])
 
     # stable random seed for reproducibility
@@ -757,7 +765,8 @@ def run_on_file(
                     FUNCTION_HOST_COLDSTART_TIME_MS=FUNCTION_HOST_COLDSTART_TIME_MS,
                     METRICS_TO_RECORD=METRICS_TO_RECORD,
                     RECORD_PRIORITY_LATENCIES=RECORD_PRIORITY_LATENCIES,
-                    ARRIVAL_POLICY=ARRIVAL_POLICY
+                    ARRIVAL_POLICY=ARRIVAL_POLICY,
+                    ACCELERATE_REQUESTS=ACCELERATE_REQUESTS
                 )
         else:
             res = process_row(
@@ -784,7 +793,8 @@ def run_on_file(
                 FUNCTION_HOST_COLDSTART_TIME_MS=FUNCTION_HOST_COLDSTART_TIME_MS,
                 METRICS_TO_RECORD=METRICS_TO_RECORD,
                 RECORD_PRIORITY_LATENCIES=RECORD_PRIORITY_LATENCIES,
-                ARRIVAL_POLICY=ARRIVAL_POLICY
+                ARRIVAL_POLICY=ARRIVAL_POLICY,
+                ACCELERATE_REQUESTS=ACCELERATE_REQUESTS
             )
 
         if res is False:

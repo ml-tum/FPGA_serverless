@@ -50,6 +50,8 @@ def run_simulator(input):
 
         METRICS_TO_RECORD=input.get("METRICS_TO_RECORD", None),
 
+        ACCELERATE_REQUESTS=input.get("ACCELERATE_REQUESTS", 1),
+
         RECORD_PRIORITY_LATENCIES=input.get("RECORD_PRIORITY_LATENCIES", False),
     )
 
@@ -75,6 +77,7 @@ def run_simulator(input):
         "function_placement_is_coldstart": input.get("FUNCTION_PLACEMENT_IS_COLDSTART", False),
 
         "characterized_functions": input["CHARACTERIZED_FUNCTIONS"],
+        "accelerate_requests": input.get("ACCELERATE_REQUESTS", 1),
 
         "scheduler_weights": encode_scheduler_weights(schedulerWeights),
     }
