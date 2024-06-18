@@ -71,7 +71,7 @@ col_base = palette[0]
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
-        df_expanded = pd.read_csv(run_on_df)
+        df = pd.read_csv(run_on_df, converters={"latencies": lambda x: x.strip("[]").split(", ")})
     else:
         maxRequests = os.getenv("MAX_REQUESTS", "1000")
 
@@ -151,17 +151,17 @@ def main() -> None:
         # Assuming df is your original DataFrame
         df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
-        df_expanded = df.explode('latencies').reset_index(drop=True)
-        df_expanded['latencies'] = df_expanded['latencies'].astype(float)
-
         # log acceleration and makespan to csv, ignore other columns
         df[["Acceleration", "makespan"]].to_csv("makespan_acceleration.csv", index=False)
 
         # save df_expanded to disk
-        df_expanded.to_csv("acceleration_df_results.csv", index=False)
+        df[["Acceleration", "latencies"]].to_csv("acceleration_df_results.csv", index=False)
 
     width = 3.3
     aspect = 1.2
+
+    df_expanded = df.explode('latencies').reset_index(drop=True)
+    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
     # Create the boxplot
     graph = sns.catplot(

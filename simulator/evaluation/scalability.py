@@ -144,8 +144,8 @@ def main() -> None:
         # Assuming df is your original DataFrame
         df["latencies"] = df["latencies"].apply(lambda x: [round(y[3], 2) for y in x.values()])
 
-        # save df_expanded to disk
-        df.to_csv("scalability_df_results.csv", index=False)
+        # save df to disk
+        df[["nodes", "latencies", "FPGA Slots per Node"]].to_csv("scalability_df_results.csv", index=False)
 
         # log number of nodes, fpga slots per node and makespan to csv, ignore other columns
         df[["nodes", "FPGA Slots per Node", "makespan"]].to_csv("makespan_scalability.csv", index=False)

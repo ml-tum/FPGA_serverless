@@ -68,7 +68,7 @@ col_base = palette[0]
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
-        df_expanded = pd.read_csv(run_on_df)
+        df = pd.read_csv(run_on_df, converters={"latencies": lambda x: x.strip("[]").split(", ")})
     else:
         maxRequests = os.getenv("MAX_REQUESTS", "1000")
 
@@ -148,14 +148,14 @@ def main() -> None:
         # Assuming df is your original DataFrame
         df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
 
-        df_expanded = df.explode('latencies').reset_index(drop=True)
-        df_expanded['latencies'] = df_expanded['latencies'].astype(float)
-
-        # save df_expanded to disk
-        df_expanded.to_csv("scheduling_df_results.csv", index=False)
+        # save df to disk
+        df[["Arrival Policy", "latencies", "Priority"]].to_csv("scheduling_df_results.csv", index=False)
 
         # log number of nodes, fpga slots per node and makespan to csv, ignore other columns
         df[["Arrival Policy", "Priority", "makespan"]].to_csv("makespan_scheduling.csv", index=False)
+
+    df_expanded = df.explode('latencies').reset_index(drop=True)
+    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
     width = 3.3
     aspect = 1.2
