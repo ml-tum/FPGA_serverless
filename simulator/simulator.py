@@ -230,7 +230,7 @@ def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER
 def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp, response_timestamp,
                       priority,
                       global_timer, add_to_wait,
-                      NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME):
+                      NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME, METRICS_TO_RECORD):
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         return False, None
 
@@ -305,10 +305,11 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
     slot['current_bitstream'] = functionName
     slot['earliest_start_date'] = response_timestamp
 
-    if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:
-        metrics['fpga_reconfigurations_per_node'][node['id']] = [processing_start_timestamp]
-    else:
-        metrics['fpga_reconfigurations_per_node'][node['id']].append(processing_start_timestamp)
+    if "fpga_reconfigurations_per_node" in METRICS_TO_RECORD:
+        if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:
+            metrics['fpga_reconfigurations_per_node'][node['id']] = [processing_start_timestamp]
+        else:
+            metrics['fpga_reconfigurations_per_node'][node['id']].append(processing_start_timestamp)
 
     node['recent_fpga_reconfiguration_count'].add(response_timestamp, 1)
     node['recent_fpga_reconfiguration_time'].add(response_timestamp, FPGA_RECONFIGURATION_TIME)
@@ -499,13 +500,15 @@ def process_row(
                                                                     response_timestamp, priority, global_timer,
                                                                     add_to_wait,
                                                                     NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                                                                    FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
+                                                                    FPGA_RECONFIGURATION_TIME_MS,
+                                                                    METRICS_TO_RECORD)  # TODO Check if this needs to run always
         else:
             needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
                                                                 processing_start_timestamp,
                                                                 response_timestamp, priority, global_timer, add_to_wait,
                                                                 NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                                                                FPGA_RECONFIGURATION_TIME_MS)  # TODO Check if this needs to run always
+                                                                FPGA_RECONFIGURATION_TIME_MS,
+                                                                METRICS_TO_RECORD)  # TODO Check if this needs to run always
 
         if needs_reconfiguration:
             if "makespan" in METRICS_TO_RECORD:
@@ -681,13 +684,6 @@ def run_on_file(
 
     for i in range(NUM_NODES):
         created_node = create_node(nodes, NUM_FPGA_SLOTS_PER_NODE, ARRIVAL_POLICY)
-
-        # initialize per-node metrics
-        metrics['fpga_reconfigurations_per_node'][created_node['id']] = []
-        metrics['fpga_usage_per_node'][created_node['id']] = 0
-        metrics['requests_per_node'][created_node['id']] = 0
-        metrics['request_duration_per_node'][created_node['id']] = 0
-        metrics['function_placements_per_node'][created_node['id']] = []
 
     if ENABLE_LOGS:
         print("Loading traces")

@@ -68,7 +68,8 @@ col_base = palette[0]
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
-        df_expanded = pd.read_csv(run_on_df)
+        # read from csv, make sure latencies are parsed back into list
+        df = pd.read_csv(run_on_df, converters={"latencies": lambda x: x.strip("[]").split(", ")})
     else:
         maxRequests = os.getenv("MAX_REQUESTS", "1000")
         inputs = {
@@ -137,17 +138,20 @@ def main() -> None:
 
         df.rename(columns={"num_fpga_slots_per_node": "FPGA Slots per Node"}, inplace=True)
 
-        # Assuming df is your original DataFrame
-        df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
+        # round makespan to 2 digits
+        df["makespan"] = df["makespan"].apply(lambda x: round(x, 2))
 
-        df_expanded = df.explode('latencies').reset_index(drop=True)
-        df_expanded['latencies'] = df_expanded['latencies'].astype(float)
+        # Assuming df is your original DataFrame
+        df["latencies"] = df["latencies"].apply(lambda x: [round(y[3], 2) for y in x.values()])
 
         # save df_expanded to disk
-        df_expanded.to_csv("scalability_df_results.csv", index=False)
+        df.to_csv("scalability_df_results.csv", index=False)
 
         # log number of nodes, fpga slots per node and makespan to csv, ignore other columns
         df[["nodes", "FPGA Slots per Node", "makespan"]].to_csv("makespan_scalability.csv", index=False)
+
+    df_expanded = df.explode('latencies').reset_index(drop=True)
+    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
     width = 3.3
     aspect = 1.2

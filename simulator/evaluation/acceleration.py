@@ -146,9 +146,6 @@ def main() -> None:
 
         assert isinstance(df, pd.DataFrame)
 
-        # replace characterized_functions with characterized_functions.label
-        df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
-
         df.rename(columns={"accelerate_requests": "Acceleration"}, inplace=True)
 
         # Assuming df is your original DataFrame

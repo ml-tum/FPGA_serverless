@@ -76,7 +76,7 @@ def run_simulator(input):
         "num_fpga_slots_per_node": input["NUM_FPGA_SLOTS_PER_NODE"],
         "function_placement_is_coldstart": input.get("FUNCTION_PLACEMENT_IS_COLDSTART", False),
 
-        "characterized_functions": input["CHARACTERIZED_FUNCTIONS"],
+        "characterized_functions": input["CHARACTERIZED_FUNCTIONS"]["label"],
         "accelerate_requests": input.get("ACCELERATE_REQUESTS", 1),
 
         "scheduler_weights": encode_scheduler_weights(schedulerWeights),

@@ -137,9 +137,6 @@ def main() -> None:
 
         assert isinstance(df, pd.DataFrame)
 
-        # replace characterized_functions with characterized_functions.label
-        df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
-
         df.rename(columns={"arrival_policy": "Arrival Policy"}, inplace=True)
         df.rename(columns={"record_priority_latencies": "Priority"}, inplace=True)
 
