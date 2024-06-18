@@ -69,92 +69,102 @@ col_base = palette[0]
 
 
 def main() -> None:
-    maxRequests = os.getenv("MAX_REQUESTS", "1000")
-
-    inputs = {
-        # The following metrics are available:
-        # METRICS_TO_RECORD = {
-        # "coldstarts", number of cold starts
-        # "makespan", total time spent on all computations and processing delays (waiting on slot to become available)
-        # "request_duration", # sum of all request durations (accounting for speedup)
-        # "fpga_reconfigurations_per_node", # map of all nodes, value is list of reconfiguration timestamps
-        # "fpga_usage_per_node", # map with entry for each node and sum of time spent on fpga on this node
-        # "requests_per_node", # number of requests per node
-        # "request_duration_per_node", # sum of all request durations per node
-        # "function_placements_per_node", # map of all nodes, value is list of function placement timestamps
-        # "metrics_per_node_over_time", # utilization snapshots at different points in time
-        # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
-        # }
-
-        "METRICS_TO_RECORD": [{"latencies", "makespan"}],
-
-        "MAX_REQUESTS": [int(maxRequests)],
-        "NUM_NODES": [1000],
-        "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
-        "FUNCTION_KEEPALIVE": [60],
-        "FPGA_RECONFIGURATION_TIME": [10],
-        "NUM_FPGA_SLOTS_PER_NODE": [4],
-        "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
-
-        # TODO Use realistic values based on findings from microbenchmarks
-        "CHARACTERIZED_FUNCTIONS": [
-            {
-                "label": "Characterized Functions",
-                "value": characterized_collection()
-            }
-        ],
-
-        "ACCELERATE_REQUESTS": [
-            0,
-            0.25,
-            0.5,
-            0.75,
-            1
-        ],
-
-        # testing variables ceteris paribus:
-        "SCHEDULER_WEIGHTS": [
-            {
-                "FPGA_BITSTREAM_LOCALITY_WEIGHT": 1,
-                "RECENT_FPGA_USAGE_TIME_WEIGHT": 2,
-                "RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT": 2,
-            }
-        ]
-    }
-
-    run_on_file = os.getenv("PLOT_ON_RESULTS", "")
-    if len(run_on_file) > 0:
-        print("loading benchmark results from file, this may take a while")
-        with open(run_on_file, "r") as f:
-            results = json.load(f)
+    run_on_df = os.getenv("PLOT_ON_DF", "")
+    if run_on_df:
+        df_expanded = pd.read_csv(run_on_df)
     else:
-        print("starting benchmark")
+        maxRequests = os.getenv("MAX_REQUESTS", "1000")
 
-        results = run_benchmark(inputs)
-        with open(f"acceleration_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json",
-                  "w") as f:
-            results_json = json.dumps(results, indent=4, sort_keys=True, default=str)
-            f.write(results_json)
+        inputs = {
+            # The following metrics are available:
+            # METRICS_TO_RECORD = {
+            # "coldstarts", number of cold starts
+            # "makespan", total time spent on all computations and processing delays (waiting on slot to become available)
+            # "request_duration", # sum of all request durations (accounting for speedup)
+            # "fpga_reconfigurations_per_node", # map of all nodes, value is list of reconfiguration timestamps
+            # "fpga_usage_per_node", # map with entry for each node and sum of time spent on fpga on this node
+            # "requests_per_node", # number of requests per node
+            # "request_duration_per_node", # sum of all request durations per node
+            # "function_placements_per_node", # map of all nodes, value is list of function placement timestamps
+            # "metrics_per_node_over_time", # utilization snapshots at different points in time
+            # "latencies" # map for each request, value is (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
+            # }
 
-    print("starting to prepare for plotting")
+            "METRICS_TO_RECORD": [{"latencies", "makespan"}],
 
-    df = pd.DataFrame(results)
+            "MAX_REQUESTS": [int(maxRequests)],
+            "NUM_NODES": [1000],
+            "FUNCTION_PLACEMENT_IS_COLDSTART": [False],
+            "FUNCTION_KEEPALIVE": [60],
+            "FPGA_RECONFIGURATION_TIME": [10],
+            "NUM_FPGA_SLOTS_PER_NODE": [4],
+            "FUNCTION_HOST_COLDSTART_TIME_MS": [100],
 
-    assert isinstance(df, pd.DataFrame)
+            # TODO Use realistic values based on findings from microbenchmarks
+            "CHARACTERIZED_FUNCTIONS": [
+                {
+                    "label": "Characterized Functions",
+                    "value": characterized_collection()
+                }
+            ],
+
+            "ACCELERATE_REQUESTS": [
+                0,
+                0.25,
+                0.5,
+                0.75,
+                1
+            ],
+
+            # testing variables ceteris paribus:
+            "SCHEDULER_WEIGHTS": [
+                {
+                    "FPGA_BITSTREAM_LOCALITY_WEIGHT": 1,
+                    "RECENT_FPGA_USAGE_TIME_WEIGHT": 2,
+                    "RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT": 2,
+                }
+            ]
+        }
+
+        run_on_file = os.getenv("PLOT_ON_RESULTS", "")
+        if len(run_on_file) > 0:
+            print("loading benchmark results from file, this may take a while")
+            with open(run_on_file, "r") as f:
+                results = json.load(f)
+        else:
+            print("starting benchmark")
+
+            results = run_benchmark(inputs)
+            with open(f"acceleration_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json",
+                      "w") as f:
+                results_json = json.dumps(results, indent=4, sort_keys=True, default=str)
+                f.write(results_json)
+
+        print("starting to prepare for plotting")
+
+        df = pd.DataFrame(results)
+
+        assert isinstance(df, pd.DataFrame)
+
+        # replace characterized_functions with characterized_functions.label
+        df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
+
+        df.rename(columns={"accelerate_requests": "Acceleration"}, inplace=True)
+
+        # Assuming df is your original DataFrame
+        df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
+
+        df_expanded = df.explode('latencies').reset_index(drop=True)
+        df_expanded['latencies'] = df_expanded['latencies'].astype(float)
+
+        # log acceleration and makespan to csv, ignore other columns
+        df[["Acceleration", "makespan"]].to_csv("makespan_acceleration.csv", index=False)
+
+        # save df_expanded to disk
+        df_expanded.to_csv("acceleration_df_results.csv", index=False)
 
     width = 3.3
     aspect = 1.2
-
-    # replace characterized_functions with characterized_functions.label
-    df["characterized_functions"] = df["characterized_functions"].apply(lambda x: x["label"])
-
-    df.rename(columns={"accelerate_requests": "Acceleration"}, inplace=True)
-
-    # Assuming df is your original DataFrame
-    df["latencies"] = df["latencies"].apply(lambda x: [y[3] for y in x.values()])
-
-    df_expanded = df.explode('latencies').reset_index(drop=True)
-    df_expanded['latencies'] = df_expanded['latencies'].astype(float)
 
     # Create the boxplot
     graph = sns.catplot(
@@ -189,9 +199,6 @@ def main() -> None:
 
     fname = "figure_acceleration" + ".pdf"
     graph.savefig(MEASURE_RESULTS / fname, bbox_inches='tight')
-
-    # log acceleration and makespan to csv, ignore other columns
-    df[["Acceleration", "makespan"]].to_csv("makespan_acceleration.csv", index=False)
 
 
 if __name__ == "__main__":
