@@ -64,10 +64,6 @@ if PAPER_MODE:
 else:
     out_format = ".png"
 
-palette = sns.color_palette("pastel")
-col_base = palette[0]
-
-
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
@@ -171,22 +167,35 @@ def main() -> None:
         kind="box",
         height=width / aspect,
         aspect=aspect,
-        palette=[col_base, palette[1], palette[2]],
+        palette="pastel",
+        saturation=1,
         showfliers=False
     )
 
-    graph.ax.set_ylabel("Latency in ms")
+    graph.ax.set_ylabel("Latency (ms)")
     graph.ax.set_xlabel("Acceleration")
 
     # add percent sign to x-axis
     graph.ax.set_xticklabels([f"{x}%" for x in range(0, 101, 25)])
 
+    hatches = ["", "..", "*", "o", "/"]
+
+    # Source: https://stackoverflow.com/a/72661020
+    # iterate through each subplot / Facet
+    for ax in graph.axes.flat:
+        # select the correct patches
+        patches = [patch for patch in ax.patches if type(patch) == mpl.patches.PathPatch]
+        # iterate through the patches for each subplot
+        for i, patch in enumerate(patches):
+            patch.set_hatch(hatches[i])
+            patch.set_edgecolor('k')
+
     FONT_SIZE = 9
     graph.ax.annotate(
         "↓ Lower is better",
-        xycoords="axes points",
-        xy=(0, 0),
-        xytext=(-50, -10),
+        xycoords="axes fraction",
+        xy=(0.2, 1),
+        xytext=(0.2, 1),
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",

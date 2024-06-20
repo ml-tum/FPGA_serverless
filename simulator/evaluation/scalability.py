@@ -61,15 +61,12 @@ if PAPER_MODE:
 else:
     out_format = ".png"
 
-palette = sns.color_palette("pastel")
-col_base = palette[0]
-
-
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
         # read from csv, make sure latencies are parsed back into list
         df = pd.read_csv(run_on_df, converters={"latencies": lambda x: x.strip("[]").split(", ")})
+        df = df.query("nodes in [10, 25, 50, 100]")
     else:
         maxRequests = os.getenv("MAX_REQUESTS", "1000")
         inputs = {
@@ -125,8 +122,7 @@ def main() -> None:
             print("starting benchmark")
 
             results = run_benchmark(inputs)
-            with open(f"scalability_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json",
-                      "w") as f:
+            with open(f"scalability_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w") as f:
                 results_json = json.dumps(results, indent=4, sort_keys=True, default=str)
                 f.write(results_json)
 
@@ -136,7 +132,7 @@ def main() -> None:
 
         assert isinstance(df, pd.DataFrame)
 
-        df.rename(columns={"num_fpga_slots_per_node": "FPGA Slots per Node"}, inplace=True)
+        df.rename(columns={"num_fpga_slots_per_node": "FPGA Slots\nper Node"}, inplace=True)
 
         # round makespan to 2 digits
         df["makespan"] = df["makespan"].apply(lambda x: round(x, 2))
@@ -165,19 +161,37 @@ def main() -> None:
         kind="box",
         height=width / aspect,
         aspect=aspect,
-        palette=[col_base, palette[1], palette[2]],
+        palette="pastel",
+        saturation=1,
         showfliers=False
     )
 
-    graph.ax.set_ylabel("Latency in ms")
-    graph.ax.set_xlabel("Number of Nodes")
+    hatches = ["", "..", "*", "o"]
+
+    # Source: https://stackoverflow.com/a/72661020
+    # iterate through each subplot / Facet
+    for ax in graph.axes.flat:
+        # select the correct patches
+        patches = [patch for patch in ax.patches if type(patch) == mpl.patches.PathPatch]
+        # iterate through the patches for each subplot
+        for i, patch in enumerate(patches):
+            patch.set_hatch(hatches[i//4])
+            patch.set_edgecolor('k')
+    for lp, hatch in zip(graph.legend.get_patches(), hatches):
+        lp.set_hatch(hatch)
+        lp.set_edgecolor('k')
+    graph._legend.set(title="FPGA slots\nper node")
+    sns.move_legend(graph, "center right", bbox_to_anchor=(0.9, 0.5))
+
+    graph.ax.set_ylabel("Latency (ms)")
+    graph.ax.set_xlabel("Number of nodes")
 
     FONT_SIZE = 9
     graph.ax.annotate(
         "↓ Lower is better",
-        xycoords="axes points",
-        xy=(0, 0),
-        xytext=(-50, -10),
+        xycoords="axes fraction",
+        xy=(0.25, 1),
+        xytext=(0.25, 1),
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",

@@ -61,10 +61,6 @@ if PAPER_MODE:
 else:
     out_format = ".png"
 
-palette = sns.color_palette("pastel")
-col_base = palette[0]
-
-
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
@@ -169,22 +165,39 @@ def main() -> None:
         kind="box",
         height=width / aspect,
         aspect=aspect,
-        palette=[col_base, palette[1], palette[2]],
+        palette="pastel",
+        saturation=1,
         showfliers=False
     )
 
-    graph.ax.set_ylabel("Latency in ms")
-    graph.ax.set_xlabel("Arrival Policy")
+    hatches = ["", ".."]
+
+    # Source: https://stackoverflow.com/a/72661020
+    # iterate through each subplot / Facet
+    for ax in graph.axes.flat:
+        # select the correct patches
+        patches = [patch for patch in ax.patches if type(patch) == mpl.patches.PathPatch]
+        # iterate through the patches for each subplot
+        for i, patch in enumerate(patches):
+            patch.set_hatch(hatches[i//2])
+            patch.set_edgecolor('k')
+    for lp, hatch in zip(graph.legend.get_patches(), hatches):
+        lp.set_hatch(hatch)
+        lp.set_edgecolor('k')
+    sns.move_legend(graph, "center right", bbox_to_anchor=(1, 0.5))
+
+    graph.ax.set_ylabel("Latency (ms)")
+    graph.ax.set_xlabel("Arrival policy")
 
     FONT_SIZE = 9
     graph.ax.annotate(
         "↓ Lower is better",
-        xycoords="axes points",
-        xy=(0, 0),
-        xytext=(-50, -10),
+        xycoords="axes fraction",
+        xy=(0.25, 1),
+        xytext=(0.25, 1),
         fontsize=FONT_SIZE,
         color="navy",
-        weight="bold"
+        weight="bold",
     )
 
     graph.despine()
