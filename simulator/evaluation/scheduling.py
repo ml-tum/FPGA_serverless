@@ -65,6 +65,7 @@ def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
         df = pd.read_csv(run_on_df, converters={"latencies": lambda x: x.strip("[]").split(", ")})
+        df = df.assign(Priority=df['Priority'].map({'High Priority': 'High', 'All Priority': 'All'}))
     else:
         maxRequests = os.getenv("MAX_REQUESTS", "1000")
 
@@ -138,7 +139,7 @@ def main() -> None:
 
         # Set label for record_priority_latencies, True should be "High Priority", False should be "All Priority"
         df["Priority"] = df["Priority"].apply(
-            lambda x: "High Priority" if x else "All Priority"
+            lambda x: "High" if x else "All"
         )
 
         # Assuming df is your original DataFrame
@@ -152,7 +153,7 @@ def main() -> None:
 
     df_expanded = df.explode('latencies').reset_index(drop=True)
     df_expanded['latencies'] = df_expanded['latencies'].astype(float)
-
+    
     width = 3.3
     aspect = 1.2
 
@@ -167,7 +168,9 @@ def main() -> None:
         aspect=aspect,
         palette="pastel",
         saturation=1,
-        showfliers=False
+        showfliers=False,
+        order=["FIFO","PRIORITY"],
+        hue_order=["All", "High"]
     )
 
     hatches = ["", ".."]
@@ -184,7 +187,7 @@ def main() -> None:
     for lp, hatch in zip(graph.legend.get_patches(), hatches):
         lp.set_hatch(hatch)
         lp.set_edgecolor('k')
-    sns.move_legend(graph, "center right", bbox_to_anchor=(1, 0.5))
+    sns.move_legend(graph, "upper right", bbox_to_anchor=(0.85, 0.87))
 
     graph.ax.set_ylabel("Latency (ms)")
     graph.ax.set_xlabel("Arrival policy")

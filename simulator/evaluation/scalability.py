@@ -181,7 +181,7 @@ def main() -> None:
         lp.set_hatch(hatch)
         lp.set_edgecolor('k')
     graph._legend.set(title="FPGA slots\nper node")
-    sns.move_legend(graph, "center right", bbox_to_anchor=(0.9, 0.5))
+    sns.move_legend(graph, "upper right", bbox_to_anchor=(0.75, 0.87))
 
     graph.ax.set_ylabel("Latency (ms)")
     graph.ax.set_xlabel("Number of nodes")
@@ -190,8 +190,8 @@ def main() -> None:
     graph.ax.annotate(
         "↓ Lower is better",
         xycoords="axes fraction",
-        xy=(0.25, 1),
-        xytext=(0.25, 1),
+        xy=(0.2, 1),
+        xytext=(0.2, 1),
         fontsize=FONT_SIZE,
         color="navy",
         weight="bold",
