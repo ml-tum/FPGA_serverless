@@ -62,6 +62,11 @@ def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY: str = "F
         'bitstreams': set(),
         'fpga_slots': slots,
 
+        'cpu': {
+            'current_invocation': None,
+            'earliest_start_date': None,
+        },
+
         'recent_baseline_utilization': usage.BaselineUtilizationTracker(),
         'recent_fpga_usage_time': usage.FPGAUsageTimeTracker(),
         'recent_fpga_reconfiguration_time': usage.FPGAReconfigurationTimeTracker(),
@@ -389,6 +394,17 @@ def process_row(
             print(f"Warning: Priority should be supplied as boolean value")
             priority = priority != 0
 
+    req_id = f"{app}-{func}-{arrival_timestamp}"
+
+    run_on_fpga = characterized_function["run_on_fpga"] and should_accelerate
+    if NUM_FPGA_SLOTS_PER_NODE == 0:
+        run_on_fpga = False
+
+    # update utilization metrics
+    fpga_ratio = characterized_function["fpga_ratio"] if run_on_fpga else 0
+    time_spent_on_cpu = (1 - fpga_ratio) * duration_ms
+    time_spent_on_fpga = fpga_ratio * duration_ms
+
     # if request is waiting, it can only end after the previous request + its own duration
     request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
     if request_is_waiting:
@@ -401,7 +417,7 @@ def process_row(
         response_timestamp = processing_start_timestamp + datetime.timedelta(milliseconds=float(
             duration_ms))  # could also write this as end_timestamp + datetime.timedelta(seconds=delay)
 
-    req_id = f"{app}-{func}-{arrival_timestamp}"
+    response_timestamp_cpu_only = processing_start_timestamp + datetime.timedelta(milliseconds=float(time_spent_on_cpu))
 
     def time_elapsed_since_previous_request(delta_seconds: int):
         return previous_request_timestamp['start'] is None or (
@@ -487,9 +503,19 @@ def process_row(
         else:
             metrics['request_duration_per_node'][deployed_on['id']] += duration_ms
 
-    run_on_fpga = characterized_function["run_on_fpga"] and should_accelerate
-    if NUM_FPGA_SLOTS_PER_NODE == 0:
-        run_on_fpga = False
+    # Check if CPU slot is available
+    if deployed_on['cpu']['earliest_start_date'] is not None and deployed_on['cpu'][
+        'earliest_start_date'] > processing_start_timestamp:
+        add_to_wait()
+
+        # all requests must wait until earliest_start_date of the earliest available slot
+        global_timer["time"] = deployed_on['cpu']['earliest_start_date']
+
+        return None
+
+    # Only advance CPU earliest start date by time spent on CPU
+    deployed_on['cpu']['earliest_start_date'] = response_timestamp_cpu_only
+    deployed_on['cpu']['current_invocation'] = req_id
 
     if run_on_fpga:
         # keep processing request on fpga
@@ -522,11 +548,6 @@ def process_row(
         if FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement:
             if "coldstarts" in METRICS_TO_RECORD:
                 metrics['coldstarts'] += 1
-
-    # update utilization metrics
-    fpga_ratio = characterized_function["fpga_ratio"] if run_on_fpga else 0
-    time_spent_on_cpu = (1 - fpga_ratio) * duration_ms
-    time_spent_on_fpga = fpga_ratio * duration_ms
 
     if "makespan" in METRICS_TO_RECORD:
         metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2)
