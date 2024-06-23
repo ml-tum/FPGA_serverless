@@ -61,6 +61,7 @@ if PAPER_MODE:
 else:
     out_format = ".png"
 
+
 def main() -> None:
     run_on_df = os.getenv("PLOT_ON_DF", "")
     if run_on_df:
@@ -122,7 +123,8 @@ def main() -> None:
             print("starting benchmark")
 
             results = run_benchmark(inputs)
-            with open(f"scalability_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w") as f:
+            with open(f"scalability_figure_evaluation_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json",
+                      "w") as f:
                 results_json = json.dumps(results, indent=4, sort_keys=True, default=str)
                 f.write(results_json)
 
@@ -132,7 +134,7 @@ def main() -> None:
 
         assert isinstance(df, pd.DataFrame)
 
-        df.rename(columns={"num_fpga_slots_per_node": "FPGA Slots\nper Node"}, inplace=True)
+        df.rename(columns={"num_fpga_slots_per_node": "FPGA Slots per Node"}, inplace=True)
 
         # round makespan to 2 digits
         df["makespan"] = df["makespan"].apply(lambda x: round(x, 2))
@@ -175,12 +177,12 @@ def main() -> None:
         patches = [patch for patch in ax.patches if type(patch) == mpl.patches.PathPatch]
         # iterate through the patches for each subplot
         for i, patch in enumerate(patches):
-            patch.set_hatch(hatches[i//4])
+            patch.set_hatch(hatches[i // 4])
             patch.set_edgecolor('k')
     for lp, hatch in zip(graph.legend.get_patches(), hatches):
         lp.set_hatch(hatch)
         lp.set_edgecolor('k')
-    graph._legend.set(title="FPGA slots\nper node")
+    graph._legend.set(title="FPGA slots per node")
     sns.move_legend(graph, "upper right", bbox_to_anchor=(0.75, 0.87))
 
     graph.ax.set_ylabel("Latency (ms)")
