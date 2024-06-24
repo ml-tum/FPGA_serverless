@@ -72,7 +72,7 @@ def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY: str = "F
 
 
 # place a function on a node
-def place_function(function, processing_start_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
+def place_function(function, functions, nodes, NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                    RECENT_FPGA_USAGE_TIME_WEIGHT, RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
                    FPGA_BITSTREAM_LOCALITY_WEIGHT):
     # lazily add function to state if not known (first invocation)

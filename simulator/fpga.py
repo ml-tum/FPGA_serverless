@@ -84,7 +84,7 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
     slot['current_bitstream'] = functionName
 
     slot['earliest_start_date'] = next_invocation_earliest_start_date + datetime.timedelta(
-        milliseconds=FPGA_RECONFIGURATION_TIME) if needs_reconfiguration else next_invocation_earliest_start_date
+        milliseconds=FPGA_RECONFIGURATION_TIME) if needs_reconfiguration else next_invocation_earliest_start_date  # TODO Check if this is far enough into the future
 
     if "fpga_reconfigurations_per_node" in METRICS_TO_RECORD:
         if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:

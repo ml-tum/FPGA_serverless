@@ -59,13 +59,6 @@ def process_row(
     if should_accelerate:
         duration_ms = round(duration_ms / characterized_function["mean_speedup"], 2)
 
-    # start with no latency (we ignore network-related latency)
-    invocation_latency = 0
-
-    # by default, requests start on arrival (if not waiting)
-    processing_start_timestamp = arrival_timestamp
-    delay = 0
-
     run_on_fpga = characterized_function["run_on_fpga"] and should_accelerate
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         run_on_fpga = False
@@ -75,15 +68,18 @@ def process_row(
     time_spent_on_cpu = (1 - fpga_ratio) * duration_ms
     time_spent_on_fpga = fpga_ratio * duration_ms
 
+    # attempt to place function
+    # there is a chance that this invocation has already been placed and is waiting to get CPU/FPGA access,
+    # in which case we don't need to place it again
     if row_is_traced:
         with newrelic.agent.FunctionTrace("place_function"):
-            deployed_on, is_function_placement = place_function(func, processing_start_timestamp, functions, nodes,
+            deployed_on, is_function_placement = place_function(func, functions, nodes,
                                                                 NUM_FPGA_SLOTS_PER_NODE,
                                                                 ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
                                                                 RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
                                                                 FPGA_BITSTREAM_LOCALITY_WEIGHT)  # TODO Check if this needs to run always
     else:
-        deployed_on, is_function_placement = place_function(func, processing_start_timestamp, functions, nodes,
+        deployed_on, is_function_placement = place_function(func, functions, nodes,
                                                             NUM_FPGA_SLOTS_PER_NODE,
                                                             ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
                                                             RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
@@ -92,35 +88,23 @@ def process_row(
     if recently_used_nodes.get(deployed_on['id']) is None:
         recently_used_nodes[deployed_on['id']] = deployed_on
 
+    # retrieve node-specific timer
     timer = node_timer[deployed_on['id']]
 
+    # by default, requests start on arrival (if not waiting)
+    processing_start_timestamp = arrival_timestamp
+
     # if request is waiting, it can only end after the previous request + its own duration
-    # if global_timer["time"] is greater than current request, we have moved the time forward by processing work
+    # if timer["time"] is greater than current request, we have moved the time forward by processing work
+    delay = 0.0
     request_is_waiting = timer["time"] is not None and arrival_timestamp < timer["time"]
     if request_is_waiting:
         processing_start_timestamp = timer["time"]  # start on earliest slot availability
-        delay = (processing_start_timestamp - arrival_timestamp).total_seconds() * 1000
-        invocation_latency += delay
-
-    functions[func] = {
-        'name': func,
-        'last_invoked_at': None,
-        'last_node': None,
-    }
+        delay = (processing_start_timestamp - arrival_timestamp) / datetime.timedelta(milliseconds=1)
 
     def time_elapsed_since_previous_request(delta_seconds: int):
         return previous_request_timestamp['start'] is None or (
                 processing_start_timestamp - previous_request_timestamp['start']).total_seconds() > delta_seconds
-
-    # we don't know how much time passed since last request so update host/slot occupancy (optimization: after 5s of last request)
-    if FUNCTION_KEEPALIVE is not None and time_elapsed_since_previous_request(5):
-        if row_is_traced:
-            with newrelic.agent.FunctionTrace("evict_inactive_functions"):
-                evict_inactive_functions(recently_used_nodes, functions, processing_start_timestamp,
-                                         FUNCTION_KEEPALIVE)
-        else:
-            evict_inactive_functions(recently_used_nodes, functions, processing_start_timestamp,
-                                     FUNCTION_KEEPALIVE)  # TODO Check if this needs to run always
 
     # decay utilization trackers every 30s
     if time_elapsed_since_previous_request(30):
@@ -136,11 +120,6 @@ def process_row(
         return False
     is_last_request = metrics['requests'] == MAX_REQUESTS
 
-    next_earliest_cpu = processing_start_timestamp + datetime.timedelta(
-        milliseconds=float(time_spent_on_cpu))
-    next_earliest_fpga = processing_start_timestamp + datetime.timedelta(
-        milliseconds=float(time_spent_on_fpga))
-
     # Check if CPU slot is available
     if deployed_on['cpu']['earliest_start_date'] is not None and deployed_on['cpu'][
         'earliest_start_date'] > processing_start_timestamp:
@@ -152,10 +131,14 @@ def process_row(
         return None
 
     # Only advance CPU earliest start date by time spent on CPU
-    deployed_on['cpu']['earliest_start_date'] = next_earliest_cpu
+    deployed_on['cpu']['earliest_start_date'] = processing_start_timestamp + datetime.timedelta(
+        milliseconds=float(time_spent_on_cpu))  # TODO Check if this is far enough into the future
     deployed_on['cpu']['current_invocation'] = req_id
 
     if run_on_fpga:
+        next_earliest_fpga = processing_start_timestamp + datetime.timedelta(
+            milliseconds=float(time_spent_on_fpga))
+
         # keep processing request on fpga
         if row_is_traced:
             with newrelic.agent.FunctionTrace("acquire_fpga_slot"):
@@ -183,9 +166,6 @@ def process_row(
         if needs_wait:
             return None
 
-        if needs_reconfiguration:
-            invocation_latency += FPGA_RECONFIGURATION_TIME_MS
-
         if (FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement) or needs_reconfiguration:
             if "coldstarts" in METRICS_TO_RECORD:
                 metrics['coldstarts'] += 1
@@ -194,10 +174,16 @@ def process_row(
             if "coldstarts" in METRICS_TO_RECORD:
                 metrics['coldstarts'] += 1
 
-    # finalize latency
-    invocation_latency += duration_ms
+    functions[func] = {
+        'name': func,
+        'last_invoked_at': processing_start_timestamp,
+        'last_node': deployed_on['id'],
+    }
 
-    response_timestamp = processing_start_timestamp + datetime.timedelta(
+    # finalize latency
+    invocation_latency = delay + (FPGA_RECONFIGURATION_TIME_MS if needs_reconfiguration else 0) + duration_ms
+
+    response_timestamp = arrival_timestamp + datetime.timedelta(
         milliseconds=float(invocation_latency))
 
     # update system utilization
@@ -218,6 +204,16 @@ def process_row(
     metrics['requests'] += 1
     if "request_duration" in METRICS_TO_RECORD:
         metrics['request_duration'] += duration_ms
+
+    # we don't know how much time passed since last request so update host/slot occupancy (optimization: after 5s of last request)
+    if FUNCTION_KEEPALIVE is not None and time_elapsed_since_previous_request(5):
+        if row_is_traced:
+            with newrelic.agent.FunctionTrace("evict_inactive_functions"):
+                evict_inactive_functions(recently_used_nodes, functions, processing_start_timestamp,
+                                         FUNCTION_KEEPALIVE)
+        else:
+            evict_inactive_functions(recently_used_nodes, functions, processing_start_timestamp,
+                                     FUNCTION_KEEPALIVE)  # TODO Check if this needs to run always
 
     # if ENABLE_LOGS:
     #     time_spent_since_previous_request = 0
