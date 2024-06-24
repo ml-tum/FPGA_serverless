@@ -36,8 +36,16 @@ def load_traces(csv_file_path: str, MAX_REQUESTS: int = 0):
             end_timestamp = convert_end_timestamp_to_datetime(row[2])
             row[2] = end_timestamp
 
-            # convert duration to float
-            row[3] = float(row[3])
+            # convert duration (seconds) to float
+            duration = float(row[3])
+            if duration < 0:
+                print("Invalid duration: {}".format(duration))
+                return False
+
+            # convert duration (seconds) to milliseconds
+            duration_ms = round(duration * 1000, 2)
+
+            row[3] = duration_ms
 
             queue.append((row, end_timestamp))
 

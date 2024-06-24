@@ -5,7 +5,7 @@ import datetime
 def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp: datetime.datetime,
                       next_invocation_earliest_start_date,
                       priority,
-                      global_timer, add_to_wait,
+                      timer, add_to_wait,
                       NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME, METRICS_TO_RECORD):
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         return False, False, None
@@ -67,10 +67,7 @@ def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_
             add_to_wait()
 
             # all requests must wait until earliest_start_date of the earliest available slot
-            global_timer["time"] = earliest_start_date
-
-            print(
-                f"req {metrics.get('requests')} wants to start at {processing_start_timestamp}, must wait for FPGA until {global_timer.get('time')}. waiting time: {required_wait}")
+            timer["time"] = earliest_start_date
 
             # can't do any work yet, so we'll return and let the slot "run"
             return True, None, None

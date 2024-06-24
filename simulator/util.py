@@ -1,5 +1,6 @@
 import usage
 from scheduler import next_best_node
+import newrelic.agent
 
 
 # Remove functions that are past the keepalive, keep bitstreams configured (no benefit in removing them)
@@ -11,6 +12,8 @@ def evict_inactive_functions(recently_used_nodes, functions, current_ts, FUNCTIO
         nextFunctions = set()
         for functionName in node['functions']:
             function = functions.get(functionName)
+            if function['last_invoked_at'] is None:
+                continue
 
             functionAge = (current_ts - function['last_invoked_at']).total_seconds()
 
@@ -76,7 +79,7 @@ def place_function(function, processing_start_timestamp, functions, nodes, NUM_F
     if functions.get(function) is None:
         functions[function] = {
             'name': function,
-            'last_invoked_at': processing_start_timestamp,
+            'last_invoked_at': None,
             'last_node': None,
         }
 
@@ -104,3 +107,18 @@ def place_function(function, processing_start_timestamp, functions, nodes, NUM_F
         #     print("Function deployed on node: {}".format(deployed_on['id']))
 
     return deployed_on, is_function_placement
+
+
+def update_trackers(recently_used_nodes, arrival_timestamp, ENABLE_LOGS, row_is_traced: bool):
+    if row_is_traced:
+        newrelic.agent.add_custom_span_attribute("recently_used_nodes", len(recently_used_nodes))
+
+    # instead of decaying all nodes, decay nodes that have recent usage and reset after this
+    for node in recently_used_nodes.values():
+        node['recent_baseline_utilization'].decay(arrival_timestamp)
+
+        node['recent_fpga_usage_time'].decay(arrival_timestamp)
+        node['recent_fpga_reconfiguration_count'].decay(arrival_timestamp)
+        node['recent_fpga_reconfiguration_time'].decay(arrival_timestamp)
+
+    recently_used_nodes.clear()

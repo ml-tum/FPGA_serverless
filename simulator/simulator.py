@@ -127,9 +127,12 @@ def run_on_file(
 
     recently_used_nodes = {}
 
-    global_timer = {
-        "time": None
-    }
+    node_timer = dict()
+    for i in range(NUM_NODES):
+        node_timer[i] = {
+            "time": None
+        }
+
     waiting = deque()
 
     num_traces = len(traces)
@@ -163,7 +166,7 @@ def run_on_file(
                     row=row,
                     metrics=metrics,
                     previous_request_timestamp=previous_request_timestamp,
-                    global_timer=global_timer,
+                    node_timer=node_timer,
                     add_to_wait=add_to_wait,
                     MAX_REQUESTS=MAX_REQUESTS,
                     FUNCTION_KEEPALIVE=FUNCTION_KEEPALIVE,
@@ -191,7 +194,7 @@ def run_on_file(
                 row=row,
                 metrics=metrics,
                 previous_request_timestamp=previous_request_timestamp,
-                global_timer=global_timer,
+                node_timer=node_timer,
                 add_to_wait=add_to_wait,
                 MAX_REQUESTS=MAX_REQUESTS,
                 FUNCTION_KEEPALIVE=FUNCTION_KEEPALIVE,

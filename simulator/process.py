@@ -3,7 +3,7 @@ import random
 import newrelic.agent
 
 from fpga import acquire_fpga_slot
-from util import evict_inactive_functions, place_function
+from util import evict_inactive_functions, place_function, update_trackers
 
 
 # Function to process each row of the CSV file
@@ -14,9 +14,9 @@ def process_row(
         functions,
         characterized_function,
         row,
-        metrics,
+        metrics: dict,
         previous_request_timestamp,
-        global_timer: dict,
+        node_timer: dict,
         add_to_wait: callable,
         row_is_traced: bool,
 
@@ -37,19 +37,20 @@ def process_row(
         ARRIVAL_POLICY: str,
         ACCELERATE_REQUESTS: float
 ):
-    app, func, orig_end_timestamp, duration = row
+    app, func, orig_end_timestamp, duration_ms = row
 
-    # convert duration (seconds) to float
-    duration = float(duration)
-    if duration < 0:
-        print("Invalid duration: {}".format(duration))
-        return False
-
-    # convert duration (seconds) to milliseconds
-    duration_ms = round(duration * 1000, 2)
+    priority = False
+    if ARRIVAL_POLICY == "PRIORITY" and characterized_function["priority"]:
+        priority = characterized_function["priority"]
+        # if priority is number and not 0, set to true
+        if not isinstance(priority, bool):
+            print(f"Warning: Priority should be supplied as boolean value")
+            priority = priority != 0
 
     # get original start timestamp (end_timestamp: function invocation end timestamp in millisecond)
     arrival_timestamp = orig_end_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
+
+    req_id = f"{metrics.get('requests')}-{app}-{func}-{arrival_timestamp}"
 
     # ACCELERATE_REQUESTS is a probability between 0 and 1, generate the chance we should accelerate this request
     should_accelerate = random.random() < ACCELERATE_REQUESTS
@@ -65,16 +66,6 @@ def process_row(
     processing_start_timestamp = arrival_timestamp
     delay = 0
 
-    priority = False
-    if ARRIVAL_POLICY == "PRIORITY" and characterized_function["priority"]:
-        priority = characterized_function["priority"]
-        # if priority is number and not 0, set to true
-        if not isinstance(priority, bool):
-            print(f"Warning: Priority should be supplied as boolean value")
-            priority = priority != 0
-
-    req_id = f"{app}-{func}-{arrival_timestamp}"
-
     run_on_fpga = characterized_function["run_on_fpga"] and should_accelerate
     if NUM_FPGA_SLOTS_PER_NODE == 0:
         run_on_fpga = False
@@ -83,44 +74,6 @@ def process_row(
     fpga_ratio = characterized_function["fpga_ratio"] if run_on_fpga else 0
     time_spent_on_cpu = (1 - fpga_ratio) * duration_ms
     time_spent_on_fpga = fpga_ratio * duration_ms
-
-    # if request is waiting, it can only end after the previous request + its own duration
-    request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
-    if request_is_waiting:
-        processing_start_timestamp = global_timer["time"]  # start on earliest slot availability
-        delay = (processing_start_timestamp - arrival_timestamp).total_seconds() * 1000
-        invocation_latency += delay
-
-        print(f"req {metrics.get('requests')} waited until {global_timer.get('time')}, delay of {delay}")
-
-        # adjust end timestamp to account for waiting time
-
-    def time_elapsed_since_previous_request(delta_seconds: int):
-        return previous_request_timestamp['start'] is None or (
-                arrival_timestamp - previous_request_timestamp['start']).total_seconds() > delta_seconds
-
-    # we don't know how much time passed since last request so update host/slot occupancy (optimization: after 5s of last request)
-    if FUNCTION_KEEPALIVE is not None and time_elapsed_since_previous_request(5):
-        if row_is_traced:
-            with newrelic.agent.FunctionTrace("evict_inactive_functions"):
-                evict_inactive_functions(recently_used_nodes, functions, arrival_timestamp, FUNCTION_KEEPALIVE)
-        else:
-            evict_inactive_functions(recently_used_nodes, functions, arrival_timestamp,
-                                     FUNCTION_KEEPALIVE)  # TODO Check if this needs to run always
-
-    # decay utilization trackers every 30s
-    if time_elapsed_since_previous_request(30):
-        if row_is_traced:
-            with newrelic.agent.FunctionTrace("update_trackers"):
-                update_trackers(recently_used_nodes, arrival_timestamp, ENABLE_LOGS, True)
-        else:
-            update_trackers(recently_used_nodes, arrival_timestamp, ENABLE_LOGS, False)
-
-    # limit requests to max for simulation
-    if MAX_REQUESTS is not None and MAX_REQUESTS > 0 and metrics['requests'] > MAX_REQUESTS:
-        print(f"Reached max requests ({metrics['requests']}), exiting")
-        return False
-    is_last_request = metrics['requests'] == MAX_REQUESTS
 
     if row_is_traced:
         with newrelic.agent.FunctionTrace("place_function"):
@@ -139,6 +92,50 @@ def process_row(
     if recently_used_nodes.get(deployed_on['id']) is None:
         recently_used_nodes[deployed_on['id']] = deployed_on
 
+    timer = node_timer[deployed_on['id']]
+
+    # if request is waiting, it can only end after the previous request + its own duration
+    # if global_timer["time"] is greater than current request, we have moved the time forward by processing work
+    request_is_waiting = timer["time"] is not None and arrival_timestamp < timer["time"]
+    if request_is_waiting:
+        processing_start_timestamp = timer["time"]  # start on earliest slot availability
+        delay = (processing_start_timestamp - arrival_timestamp).total_seconds() * 1000
+        invocation_latency += delay
+
+    functions[func] = {
+        'name': func,
+        'last_invoked_at': None,
+        'last_node': None,
+    }
+
+    def time_elapsed_since_previous_request(delta_seconds: int):
+        return previous_request_timestamp['start'] is None or (
+                processing_start_timestamp - previous_request_timestamp['start']).total_seconds() > delta_seconds
+
+    # we don't know how much time passed since last request so update host/slot occupancy (optimization: after 5s of last request)
+    if FUNCTION_KEEPALIVE is not None and time_elapsed_since_previous_request(5):
+        if row_is_traced:
+            with newrelic.agent.FunctionTrace("evict_inactive_functions"):
+                evict_inactive_functions(recently_used_nodes, functions, processing_start_timestamp,
+                                         FUNCTION_KEEPALIVE)
+        else:
+            evict_inactive_functions(recently_used_nodes, functions, processing_start_timestamp,
+                                     FUNCTION_KEEPALIVE)  # TODO Check if this needs to run always
+
+    # decay utilization trackers every 30s
+    if time_elapsed_since_previous_request(30):
+        if row_is_traced:
+            with newrelic.agent.FunctionTrace("update_trackers"):
+                update_trackers(recently_used_nodes, processing_start_timestamp, ENABLE_LOGS, True)
+        else:
+            update_trackers(recently_used_nodes, processing_start_timestamp, ENABLE_LOGS, False)
+
+    # limit requests to max for simulation
+    if MAX_REQUESTS is not None and MAX_REQUESTS > 0 and metrics['requests'] > MAX_REQUESTS:
+        print(f"Reached max requests ({metrics['requests']}), exiting")
+        return False
+    is_last_request = metrics['requests'] == MAX_REQUESTS
+
     next_earliest_cpu = processing_start_timestamp + datetime.timedelta(
         milliseconds=float(time_spent_on_cpu))
     next_earliest_fpga = processing_start_timestamp + datetime.timedelta(
@@ -150,9 +147,7 @@ def process_row(
         add_to_wait()
 
         # all requests must wait until earliest_start_date of the earliest available slot
-        global_timer["time"] = deployed_on['cpu']['earliest_start_date']
-        print(
-            f"req {metrics.get('requests')} wants to start at {processing_start_timestamp}, must wait for CPU until {global_timer.get('time')}")
+        node_timer[deployed_on['id']]["time"] = deployed_on['cpu']['earliest_start_date']
 
         return None
 
@@ -169,7 +164,7 @@ def process_row(
                                                                                 processing_start_timestamp,
                                                                                 next_earliest_fpga,
                                                                                 priority,
-                                                                                global_timer,
+                                                                                timer,
                                                                                 add_to_wait,
                                                                                 NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                                                                                 FPGA_RECONFIGURATION_TIME_MS,
@@ -179,7 +174,7 @@ def process_row(
                                                                             func,
                                                                             processing_start_timestamp,
                                                                             next_earliest_fpga,
-                                                                            priority, global_timer,
+                                                                            priority, timer,
                                                                             add_to_wait,
                                                                             NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
                                                                             FPGA_RECONFIGURATION_TIME_MS,
@@ -204,8 +199,6 @@ def process_row(
 
     response_timestamp = processing_start_timestamp + datetime.timedelta(
         milliseconds=float(invocation_latency))
-
-    print(f"req {metrics['requests']} ended at {response_timestamp}, global timer: {global_timer.get('time')}\n")
 
     # update system utilization
     deployed_on['recent_baseline_utilization'].add(response_timestamp,
@@ -244,9 +237,9 @@ def process_row(
 
         if "function_placements_per_node" in METRICS_TO_RECORD:
             if metrics['function_placements_per_node'].get(deployed_on['id']) is None:
-                metrics['function_placements_per_node'][deployed_on['id']] = [arrival_timestamp]
+                metrics['function_placements_per_node'][deployed_on['id']] = [processing_start_timestamp]
             else:
-                metrics['function_placements_per_node'][deployed_on['id']].append(arrival_timestamp)
+                metrics['function_placements_per_node'][deployed_on['id']].append(processing_start_timestamp)
 
     if "requests_per_node" in METRICS_TO_RECORD:
         if metrics['requests_per_node'].get(deployed_on['id']) is None:
@@ -271,12 +264,12 @@ def process_row(
                                       nodes.values()]
 
         metrics['metrics_per_node_over_time'].append({
-            'timestamp': arrival_timestamp,
+            'timestamp': processing_start_timestamp,
             'baseline_utilization_time': baseline_utilization_times,
             'fpga_reconfiguration_time': fpga_reconfiguration_times,
             'fpga_usage_time': fpga_usage_times,
         })
-        previous_request_timestamp['start'] = arrival_timestamp
+        previous_request_timestamp['start'] = processing_start_timestamp
         previous_request_timestamp['end'] = response_timestamp
 
     # Immediately releasing means we have to coldstart for every request
@@ -289,18 +282,3 @@ def process_row(
             arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
 
     return True
-
-
-def update_trackers(recently_used_nodes, arrival_timestamp, ENABLE_LOGS, row_is_traced: bool):
-    if row_is_traced:
-        newrelic.agent.add_custom_span_attribute("recently_used_nodes", len(recently_used_nodes))
-
-    # instead of decaying all nodes, decay nodes that have recent usage and reset after this
-    for node in recently_used_nodes.values():
-        node['recent_baseline_utilization'].decay(arrival_timestamp)
-
-        node['recent_fpga_usage_time'].decay(arrival_timestamp)
-        node['recent_fpga_reconfiguration_count'].decay(arrival_timestamp)
-        node['recent_fpga_reconfiguration_time'].decay(arrival_timestamp)
-
-    recently_used_nodes.clear()
