@@ -56,59 +56,74 @@ class TestWaiting(TestCase):
         for key in metrics["latencies"]:
             sum_delays += metrics["latencies"][key][5]
 
-        self.assertEqual(sum_delays, 71.0 * 1000)
+        self.assertEqual(sum_delays, 71.28 * 1000)
 
-        # self.assertEqual(metrics["makespan"], 185080.0)
+        self.assertEqual(metrics["makespan"], 62150.0)
 
         # (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
         self.assertEqual(metrics["latencies"], {'1-a-2021-01-31 01:00:00': (datetime.datetime(2021, 1, 31, 1, 0),
                                                                             datetime.datetime(2021, 1, 31, 1, 0),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 1),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 1,
+                                                                                              10000),
                                                                             1010.0,
                                                                             1000.0,
                                                                             0),
                                                 '2-b-2021-01-31 01:00:01': (datetime.datetime(2021, 1, 31, 1, 0, 1),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 1),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 3),
-                                                                            2010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 1,
+                                                                                              10000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 3,
+                                                                                              30000),
+                                                                            2020.0,
                                                                             2000.0,
-                                                                            0),
+                                                                            10.0),
                                                 '3-c-2021-01-31 01:00:02': (datetime.datetime(2021, 1, 31, 1, 0, 2),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 3),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 6),
-                                                                            4010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 3,
+                                                                                              20000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 7,
+                                                                                              50000),
+                                                                            4030.0,
                                                                             3000.0,
-                                                                            1000.0),
+                                                                            1020.0),
                                                 '4-d-2021-01-31 01:00:02': (datetime.datetime(2021, 1, 31, 1, 0, 2),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 6),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 10),
-                                                                            8010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 6,
+                                                                                              30000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 14,
+                                                                                              70000),
+                                                                            8040.0,
                                                                             4000.0,
-                                                                            4000.0),
+                                                                            4030.0000000000005),
                                                 '5-e-2021-01-31 01:00:02': (datetime.datetime(2021, 1, 31, 1, 0, 2),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 10),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 15),
-                                                                            13010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 10,
+                                                                                              40000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 23,
+                                                                                              90000),
+                                                                            13050.0,
                                                                             5000.0,
-                                                                            8000.0),
+                                                                            8039.999999999999),
                                                 '6-f-2021-01-31 01:00:02': (datetime.datetime(2021, 1, 31, 1, 0, 2),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 15),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 21),
-                                                                            19010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 15,
+                                                                                              50000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 34,
+                                                                                              110000),
+                                                                            19060.0,
                                                                             6000.0,
-                                                                            13000.0),
+                                                                            13050.0),
                                                 '7-g-2021-01-31 01:00:02': (datetime.datetime(2021, 1, 31, 1, 0, 2),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 21),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 28),
-                                                                            26010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 21,
+                                                                                              60000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 47,
+                                                                                              130000),
+                                                                            26070.0,
                                                                             7000.0,
-                                                                            19000.0),
+                                                                            19060.0),
                                                 '8-h-2021-01-31 01:00:02': (datetime.datetime(2021, 1, 31, 1, 0, 2),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 28),
-                                                                            datetime.datetime(2021, 1, 31, 1, 0, 36),
-                                                                            34010.0,
+                                                                            datetime.datetime(2021, 1, 31, 1, 0, 28,
+                                                                                              70000),
+                                                                            datetime.datetime(2021, 1, 31, 1, 1, 2,
+                                                                                              150000),
+                                                                            34080.0,
                                                                             8000.0,
-                                                                            26000.0)})
+                                                                            26070.0)})
 
         # create a gantt chart for the arrival, processing start, and response times of each request
         df_rows = []
@@ -119,7 +134,9 @@ class TestWaiting(TestCase):
             df = df_rows.append({
                 "State": "waiting",
                 "Task": key + "-arrival",
+                # arrival_timestamp
                 "Start": metrics["latencies"][key][0],
+                # processing_start_timestamp
                 "Finish": metrics["latencies"][key][1],
                 "Resource": key.split("-")[1]
             })
@@ -128,7 +145,9 @@ class TestWaiting(TestCase):
             df = df_rows.append({
                 "State": "processing",
                 "Task": key + "-processing",
+                # processing_start_timestamp
                 "Start": metrics["latencies"][key][1],
+                # response_timestamp
                 "Finish": metrics["latencies"][key][2],
                 "Resource": key.split("-")[1]
             })

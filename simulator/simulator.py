@@ -1,615 +1,12 @@
 import os
 
 import newrelic.agent
-import csv
-import datetime
 import random
 import preprocess
 from collections import deque
 
-import usage
-
-
-# Remove functions that are past the keepalive, keep bitstreams configured (no benefit in removing them)
-def evict_inactive_functions(recently_used_nodes, functions, current_ts, FUNCTION_KEEPALIVE):
-    for nodeIdx in recently_used_nodes:
-        node = recently_used_nodes[nodeIdx]
-
-        # remove functions that have expired
-        nextFunctions = set()
-        for functionName in node['functions']:
-            function = functions.get(functionName)
-
-            functionAge = (current_ts - function['last_invoked_at']).total_seconds()
-
-            if functionAge <= FUNCTION_KEEPALIVE:
-                # print("Function removed: {}".format(function['name']))
-                nextFunctions.add(functionName)
-            # TODO Make sure this works as expected
-            else:
-                function['last_node'] = None
-
-        node['functions'] = nextFunctions
-    pass
-
-
-def create_node(nodes: dict, NUM_FPGA_SLOTS_PER_NODE=2, ARRIVAL_POLICY: str = "FIFO"):
-    nextId = len(nodes)
-
-    slots = {}
-    for i in range(NUM_FPGA_SLOTS_PER_NODE):
-        slots[i] = {
-            'current_bitstream': None,
-            'earliest_start_date': None,
-            'priority': (ARRIVAL_POLICY == "PRIORITY") and (i == (NUM_FPGA_SLOTS_PER_NODE - 1)),
-        }
-
-        # sanity check slots[i]["priority"] is boolean value
-        if not isinstance(slots[i]["priority"], bool):
-            raise Exception(f"Slot Priority should be supplied as boolean value")
-
-    # sanity check: if ARRIVAL_POLICY = "PRIORITY", there must be at least one slot with priority = True and at least one slot with priority = False
-    if ARRIVAL_POLICY == "PRIORITY":
-        if not any(slot["priority"] for slot in slots.values()):
-            raise Exception(f"ARRIVAL_POLICY = 'PRIORITY' requires at least one slot with priority = True")
-        if not any(not slot["priority"] for slot in slots.values()):
-            raise Exception(f"ARRIVAL_POLICY = 'PRIORITY' requires at least one slot with priority = False")
-
-    new_node = {
-        'id': nextId,
-        'functions': set(),
-
-        'bitstreams': set(),
-        'fpga_slots': slots,
-
-        'cpu': {
-            'current_invocation': None,
-            'earliest_start_date': None,
-        },
-
-        'recent_baseline_utilization': usage.BaselineUtilizationTracker(),
-        'recent_fpga_usage_time': usage.FPGAUsageTimeTracker(),
-        'recent_fpga_reconfiguration_time': usage.FPGAReconfigurationTimeTracker(),
-        'recent_fpga_reconfiguration_count': usage.FPGAReconfigurationCountTracker(),
-    }
-    nodes[len(nodes)] = new_node
-    return new_node
-
-
-# determine the best node to place a function on
-# this function simulates the Kubernetes schedulers
-def next_best_node(nodes: dict, functionName: str, recent_fpga_usage_time_weight,
-                   recent_fpga_reconfiguration_time_weight, fpga_bitstream_locality_weight):
-    if len(nodes) == 0:
-        return None
-
-    # if we have more than 100 nodes, take a random sample of 100 nodes
-    if len(nodes) > 100:
-        nodes_to_select_from = random.sample(list(nodes.keys()), 100)
-    else:
-        nodes_to_select_from = list(nodes.keys())
-
-    prescored = []
-    for nodeKey in nodes_to_select_from:
-        node = nodes.get(nodeKey)
-
-        # collect relevant criteria
-        baseline_utilization = node['recent_baseline_utilization'].get_window_value()
-
-        # recent FPGA utilization in seconds
-        recent_utilization = node['recent_fpga_usage_time'].get_window_value()
-
-        # recent reconfiguration times in seconds
-        recent_reconfiguration_times = node['recent_fpga_reconfiguration_time'].get_window_value()
-
-        has_fitting_bitstream = 0
-        if functionName in node['bitstreams']:
-            has_fitting_bitstream = 1
-
-        score = (nodeKey, recent_utilization, recent_reconfiguration_times, has_fitting_bitstream, baseline_utilization)
-
-        prescored.append(score)
-
-    # sort utilization scores of all nodes in ascending order
-    sorted_usage_time = prescored.copy()
-    sorted_usage_time.sort(key=lambda x: x[1])
-
-    # sort reconfiguration scores of all nodes in ascending order
-    sorted_reconfiguration_time = prescored.copy()
-    sorted_reconfiguration_time.sort(key=lambda x: x[2])
-
-    sorted_baseline_utilization = prescored.copy()
-    sorted_baseline_utilization.sort(key=lambda x: x[4])
-
-    # calculate normalized to best scores
-    scored = []
-    for nodeKey, _, _, has_fitting_bitstream, _ in prescored:
-        scored.append((nodeKey,
-                       score_node(sorted_usage_time, sorted_reconfiguration_time, sorted_baseline_utilization, nodeKey,
-                                  has_fitting_bitstream, recent_fpga_usage_time_weight,
-                                  recent_fpga_reconfiguration_time_weight, fpga_bitstream_locality_weight)))
-
-    # sort by score, highest first
-    scored.sort(key=lambda x: x[1], reverse=True)
-    # best node is first element
-    best_node = scored[0][0]
-
-    return nodes.get(best_node)
-
-
-# create a normalized score for a node based on its utilization and reconfiguration times
-def score_node(sorted_fpga_usage_time, sorted_fpga_reconfiguration_time, sorted_baseline_utilization, nodeId,
-               has_fitting_bitstream, recent_fpga_usage_time_weight=1, recent_fpga_reconfiguration_time_weight=1,
-               fpga_bitstream_locality_weight=1, baseline_utilization_weight=1):
-    baseline_utilization_pos = None
-    for i in range(len(sorted_baseline_utilization)):
-        if sorted_baseline_utilization[i][0] == nodeId:
-            baseline_utilization_pos = i
-            break
-    if baseline_utilization_pos is None:
-        raise Exception("Node not found in sorted list")
-
-    baseline_utilization_score = (len(sorted_baseline_utilization) - baseline_utilization_pos) / len(
-        sorted_baseline_utilization)
-
-    # find index of node in sorted list
-    recent_fpga_usage_time_pos = None
-    for i in range(len(sorted_fpga_usage_time)):
-        if sorted_fpga_usage_time[i][0] == nodeId:
-            recent_fpga_usage_time_pos = i
-            break
-    if recent_fpga_usage_time_pos is None:
-        raise Exception("Node not found in sorted list")
-
-    recent_fpga_usage_time_score = (len(sorted_fpga_reconfiguration_time) - recent_fpga_usage_time_pos) / len(
-        sorted_fpga_usage_time)
-
-    # find index of node in sorted list
-    recent_fpga_reconfiguration_time_pos = None
-    for i in range(len(sorted_fpga_reconfiguration_time)):
-        if sorted_fpga_reconfiguration_time[i][0] == nodeId:
-            recent_fpga_reconfiguration_time_pos = i
-            break
-    if recent_fpga_reconfiguration_time_pos is None:
-        raise Exception("Node not found in sorted list")
-
-    recent_fpga_reconfiguration_score = (
-                                                len(sorted_fpga_reconfiguration_time) - recent_fpga_reconfiguration_time_pos) / len(
-        sorted_fpga_reconfiguration_time)
-
-    if recent_fpga_usage_time_weight + recent_fpga_reconfiguration_time_weight + fpga_bitstream_locality_weight == 0:
-        return baseline_utilization_score
-
-    # equally weigh normalized (between 0-1) criteria
-    fpga_weight = (
-                          recent_fpga_usage_time_weight + recent_fpga_reconfiguration_time_weight + fpga_bitstream_locality_weight) / 3
-    fpga_score = (
-                         recent_fpga_usage_time_weight * recent_fpga_usage_time_score + recent_fpga_reconfiguration_time_weight * recent_fpga_reconfiguration_score + fpga_bitstream_locality_weight * has_fitting_bitstream) / (
-                         recent_fpga_usage_time_weight + recent_fpga_reconfiguration_time_weight + fpga_bitstream_locality_weight)
-
-    weighted_score = (baseline_utilization_weight * baseline_utilization_score + fpga_weight * fpga_score) / (
-            baseline_utilization_weight + fpga_weight)
-
-    return weighted_score
-
-
-# place a function on a node
-def place_function(function, end_timestamp, functions, nodes, NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                   RECENT_FPGA_USAGE_TIME_WEIGHT, RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
-                   FPGA_BITSTREAM_LOCALITY_WEIGHT):
-    # lazily add function to state if not known (first invocation)
-    if functions.get(function) is None:
-        functions[function] = {
-            'name': function,
-            'last_invoked_at': end_timestamp,
-            'last_node': None,
-        }
-
-    # check if function is deployed on any node
-    deployed_on = None
-    if functions[function]['last_node'] is not None:
-        deployed_on = nodes.get(functions[function]['last_node'])
-
-    is_function_placement = deployed_on is None
-
-    if is_function_placement:
-        # deploy function on next best node (run scheduler)
-        deployed_on = next_best_node(nodes, function, RECENT_FPGA_USAGE_TIME_WEIGHT,
-                                     RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT, FPGA_BITSTREAM_LOCALITY_WEIGHT)
-        if deployed_on is None:
-            # no node has enough space, create new node
-            deployed_on = create_node(nodes, NUM_FPGA_SLOTS_PER_NODE)
-
-            if ENABLE_LOGS:
-                print("New node created: {}".format(deployed_on['id']))
-
-        deployed_on['functions'].add(function)
-        functions[function]['last_node'] = deployed_on['id']
-        # if ENABLE_LOGS:
-        #     print("Function deployed on node: {}".format(deployed_on['id']))
-
-    return deployed_on, is_function_placement
-
-
-# acquire an FPGA slot for a function (place bitstream on node FPGA)
-def acquire_fpga_slot(functions, nodes, metrics, node, functionName, processing_start_timestamp, response_timestamp,
-                      priority,
-                      global_timer, add_to_wait,
-                      NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS, FPGA_RECONFIGURATION_TIME, METRICS_TO_RECORD):
-    if NUM_FPGA_SLOTS_PER_NODE == 0:
-        return False, None
-
-    # check if function is deployed on any FPGA slot, update last_invoked_at
-    function = functions.get(functionName)
-
-    slot = None
-    slot_key = None
-
-    earliest_start_date = None
-
-    needs_reconfiguration = functionName not in node['bitstreams']
-
-    for slotIdx in node['fpga_slots']:
-        current_slot = node['fpga_slots'][slotIdx]
-
-        # if we have a slot with a matching bitstream, pick that
-        if not needs_reconfiguration:
-            if current_slot['current_bitstream'] != functionName:
-                continue
-
-            slot_key = slotIdx
-            slot = current_slot
-            break
-
-        # otherwise the priority must match
-        if priority != current_slot['priority']:
-            continue
-
-        # and then it must be empty
-        if current_slot['current_bitstream'] is None:
-            slot = current_slot
-            slot_key = slotIdx
-            break
-
-        # or at least not working
-        if earliest_start_date is None or current_slot['earliest_start_date'] is None:
-            slot = current_slot
-            slot_key = slotIdx
-            earliest_start_date = current_slot['earliest_start_date']
-
-        # or having completed its work before
-        if current_slot['earliest_start_date'] < earliest_start_date:
-            slot = current_slot
-            slot_key = slotIdx
-            earliest_start_date = current_slot['earliest_start_date']
-
-    if slot is None:
-        raise Exception(f"No slot found for priority {priority}")
-
-    if needs_reconfiguration:
-        # If slot is not available at current time, wait until it is
-        can_run_on_slot = earliest_start_date is None or earliest_start_date <= processing_start_timestamp
-        if not can_run_on_slot:
-            add_to_wait()
-
-            # all requests must wait until earliest_start_date of the earliest available slot
-            global_timer["time"] = earliest_start_date
-
-            # can't do any work yet, so we'll return and let the slot "run"
-            return None, None
-
-        if slot['current_bitstream'] is not None:
-            node["bitstreams"].remove(slot["current_bitstream"])
-            slot["current_bitstream"] = None
-            slot["earliest_start_date"] = None
-
-    # deploy function on next best FPGA slot
-    node['bitstreams'].add(functionName)
-
-    function['bitstream_started_at'] = processing_start_timestamp
-    slot['current_bitstream'] = functionName
-    slot['earliest_start_date'] = response_timestamp
-
-    if "fpga_reconfigurations_per_node" in METRICS_TO_RECORD:
-        if metrics['fpga_reconfigurations_per_node'].get(node['id']) is None:
-            metrics['fpga_reconfigurations_per_node'][node['id']] = [processing_start_timestamp]
-        else:
-            metrics['fpga_reconfigurations_per_node'][node['id']].append(processing_start_timestamp)
-
-    node['recent_fpga_reconfiguration_count'].add(response_timestamp, 1)
-    node['recent_fpga_reconfiguration_time'].add(response_timestamp, FPGA_RECONFIGURATION_TIME)
-
-    nodes[node['id']] = node
-
-    return needs_reconfiguration, slot_key
-
-
-# Function to process each row of the CSV file
-def process_row(
-        # internal state
-        nodes,
-        recently_used_nodes,
-        functions,
-        characterized_function,
-        row,
-        metrics,
-        previous_request_timestamp,
-        global_timer: dict,
-        add_to_wait: callable,
-        row_is_traced: bool,
-
-        # run options
-        MAX_REQUESTS: int,
-        FUNCTION_KEEPALIVE: float,
-        NUM_FPGA_SLOTS_PER_NODE: int,
-        ENABLE_LOGS: bool,
-        FPGA_RECONFIGURATION_TIME_MS: float,
-        ENABLE_PROGRESS_LOGS: bool,
-        RECENT_FPGA_USAGE_TIME_WEIGHT: float,
-        RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT: float,
-        FPGA_BITSTREAM_LOCALITY_WEIGHT: float,
-        FUNCTION_PLACEMENT_IS_COLDSTART: bool,
-        FUNCTION_HOST_COLDSTART_TIME_MS: float,
-        METRICS_TO_RECORD: set,
-        RECORD_PRIORITY_LATENCIES: bool,
-        ARRIVAL_POLICY: str,
-        ACCELERATE_REQUESTS: float
-):
-    app, func, response_timestamp, duration = row
-
-    # convert duration (seconds) to float
-    duration = float(duration)
-    if duration < 0:
-        print("Invalid duration: {}".format(duration))
-        return False
-
-    # convert duration (seconds) to milliseconds
-    duration_ms = round(duration * 1000, 2)
-
-    # get original start timestamp
-    arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
-
-    # ACCELERATE_REQUESTS is a probability between 0 and 1, generate the chance we should accelerate this request
-    should_accelerate = random.random() < ACCELERATE_REQUESTS
-
-    # adjust duration by expected acceleration
-    if should_accelerate:
-        duration_ms = round(duration_ms / characterized_function["mean_speedup"], 2)
-
-    # compute adjusted end timestamp
-    response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration_ms))
-
-    # start with no latency (we ignore network-related latency)
-    invocation_latency = 0
-
-    # by default, requests start on arrival (if not waiting)
-    processing_start_timestamp = arrival_timestamp
-    delay = 0
-
-    priority = False
-    if ARRIVAL_POLICY == "PRIORITY" and characterized_function["priority"]:
-        priority = characterized_function["priority"]
-        # if priority is number and not 0, set to true
-        if not isinstance(priority, bool):
-            print(f"Warning: Priority should be supplied as boolean value")
-            priority = priority != 0
-
-    req_id = f"{app}-{func}-{arrival_timestamp}"
-
-    run_on_fpga = characterized_function["run_on_fpga"] and should_accelerate
-    if NUM_FPGA_SLOTS_PER_NODE == 0:
-        run_on_fpga = False
-
-    # update utilization metrics
-    fpga_ratio = characterized_function["fpga_ratio"] if run_on_fpga else 0
-    time_spent_on_cpu = (1 - fpga_ratio) * duration_ms
-    time_spent_on_fpga = fpga_ratio * duration_ms
-
-    # if request is waiting, it can only end after the previous request + its own duration
-    request_is_waiting = global_timer["time"] is not None and global_timer["time"] > arrival_timestamp
-    if request_is_waiting:
-        processing_start_timestamp = global_timer["time"]  # start on earliest slot availability
-        delay = (processing_start_timestamp - arrival_timestamp).total_seconds() * 1000
-        if "makespan" in METRICS_TO_RECORD:
-            metrics['makespan'] += 0  # delay
-        invocation_latency += delay
-        # adjust end timestamp to account for waiting time
-        response_timestamp = processing_start_timestamp + datetime.timedelta(milliseconds=float(
-            duration_ms))  # could also write this as end_timestamp + datetime.timedelta(seconds=delay)
-
-    response_timestamp_cpu_only = processing_start_timestamp + datetime.timedelta(milliseconds=float(time_spent_on_cpu))
-
-    def time_elapsed_since_previous_request(delta_seconds: int):
-        return previous_request_timestamp['start'] is None or (
-                arrival_timestamp - previous_request_timestamp['start']).total_seconds() > delta_seconds
-
-    # we don't know how much time passed since last request so update host/slot occupancy (optimization: after 5s of last request)
-    if FUNCTION_KEEPALIVE is not None and time_elapsed_since_previous_request(5):
-        if row_is_traced:
-            with newrelic.agent.FunctionTrace("evict_inactive_functions"):
-                evict_inactive_functions(recently_used_nodes, functions, arrival_timestamp, FUNCTION_KEEPALIVE)
-        else:
-            evict_inactive_functions(recently_used_nodes, functions, arrival_timestamp,
-                                     FUNCTION_KEEPALIVE)  # TODO Check if this needs to run always
-
-    # decay utilization trackers every 30s
-    if time_elapsed_since_previous_request(30):
-        if row_is_traced:
-            with newrelic.agent.FunctionTrace("update_trackers"):
-                update_trackers(recently_used_nodes, response_timestamp, ENABLE_LOGS, True)
-        else:
-            update_trackers(recently_used_nodes, response_timestamp, ENABLE_LOGS, False)
-
-    # limit requests to max for simulation
-    if MAX_REQUESTS is not None and MAX_REQUESTS > 0 and metrics['requests'] > MAX_REQUESTS:
-        print(f"Reached max requests ({metrics['requests']}), exiting")
-        return False
-    is_last_request = metrics['requests'] == MAX_REQUESTS
-
-    metrics['requests'] += 1
-    if "request_duration" in METRICS_TO_RECORD:
-        metrics['request_duration'] += duration_ms
-
-    # if ENABLE_LOGS:
-    #     time_spent_since_previous_request = 0
-    #     if previous_request_timestamp is not None and previous_request_timestamp["end"] is not None:
-    #         time_spent_since_previous_request = (start_timestamp - previous_request_timestamp["end"]).total_seconds()
-    #     print("-- req; (+{}s) App: {}, Function: {}, Start Timestamp: {}, End Timestamp: {}, Duration: {}".format(
-    #         time_spent_since_previous_request, app, func, start_timestamp, end_timestamp, duration))
-
-    if ENABLE_PROGRESS_LOGS and metrics['requests'] % 1000 == 0:
-        print("Requests: {}".format(metrics['requests']))
-
-    if row_is_traced:
-        with newrelic.agent.FunctionTrace("place_function"):
-            deployed_on, is_function_placement = place_function(func, response_timestamp, functions, nodes,
-                                                                NUM_FPGA_SLOTS_PER_NODE,
-                                                                ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
-                                                                RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
-                                                                FPGA_BITSTREAM_LOCALITY_WEIGHT)  # TODO Check if this needs to run always
-    else:
-        deployed_on, is_function_placement = place_function(func, response_timestamp, functions, nodes,
-                                                            NUM_FPGA_SLOTS_PER_NODE,
-                                                            ENABLE_LOGS, RECENT_FPGA_USAGE_TIME_WEIGHT,
-                                                            RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT,
-                                                            FPGA_BITSTREAM_LOCALITY_WEIGHT)  # TODO Check if this needs to run always
-
-    if recently_used_nodes.get(deployed_on['id']) is None:
-        recently_used_nodes[deployed_on['id']] = deployed_on
-
-    # update metrics
-    if is_function_placement:
-        # only count placement toward makespan and latency if it should be understood as cold start
-        if FUNCTION_PLACEMENT_IS_COLDSTART:
-            if "makespan" in METRICS_TO_RECORD:
-                metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS
-            invocation_latency += FUNCTION_HOST_COLDSTART_TIME_MS
-
-        if "function_placements_per_node" in METRICS_TO_RECORD:
-            if metrics['function_placements_per_node'].get(deployed_on['id']) is None:
-                metrics['function_placements_per_node'][deployed_on['id']] = [arrival_timestamp]
-            else:
-                metrics['function_placements_per_node'][deployed_on['id']].append(arrival_timestamp)
-
-    if "requests_per_node" in METRICS_TO_RECORD:
-        if metrics['requests_per_node'].get(deployed_on['id']) is None:
-            metrics['requests_per_node'][deployed_on['id']] = 1
-        else:
-            metrics['requests_per_node'][deployed_on['id']] += 1
-
-    if "request_duration_per_node" in METRICS_TO_RECORD:
-        if metrics['request_duration_per_node'].get(deployed_on['id']) is None:
-            metrics['request_duration_per_node'][deployed_on['id']] = duration_ms
-        else:
-            metrics['request_duration_per_node'][deployed_on['id']] += duration_ms
-
-    # Check if CPU slot is available
-    if deployed_on['cpu']['earliest_start_date'] is not None and deployed_on['cpu'][
-        'earliest_start_date'] > processing_start_timestamp:
-        add_to_wait()
-
-        # all requests must wait until earliest_start_date of the earliest available slot
-        global_timer["time"] = deployed_on['cpu']['earliest_start_date']
-
-        return None
-
-    # Only advance CPU earliest start date by time spent on CPU
-    deployed_on['cpu']['earliest_start_date'] = response_timestamp_cpu_only
-    deployed_on['cpu']['current_invocation'] = req_id
-
-    if run_on_fpga:
-        # keep processing request on fpga
-        if row_is_traced:
-            with newrelic.agent.FunctionTrace("acquire_fpga_slot"):
-                needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
-                                                                    processing_start_timestamp,
-                                                                    response_timestamp, priority, global_timer,
-                                                                    add_to_wait,
-                                                                    NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                                                                    FPGA_RECONFIGURATION_TIME_MS,
-                                                                    METRICS_TO_RECORD)  # TODO Check if this needs to run always
-        else:
-            needs_reconfiguration, slot_key = acquire_fpga_slot(functions, nodes, metrics, deployed_on, func,
-                                                                processing_start_timestamp,
-                                                                response_timestamp, priority, global_timer, add_to_wait,
-                                                                NUM_FPGA_SLOTS_PER_NODE, ENABLE_LOGS,
-                                                                FPGA_RECONFIGURATION_TIME_MS,
-                                                                METRICS_TO_RECORD)  # TODO Check if this needs to run always
-
-        if needs_reconfiguration:
-            if "makespan" in METRICS_TO_RECORD:
-                metrics['makespan'] += FPGA_RECONFIGURATION_TIME_MS
-            invocation_latency += FPGA_RECONFIGURATION_TIME_MS
-
-        if (FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement) or needs_reconfiguration:
-            if "coldstarts" in METRICS_TO_RECORD:
-                metrics['coldstarts'] += 1
-    else:
-        if FUNCTION_PLACEMENT_IS_COLDSTART and is_function_placement:
-            if "coldstarts" in METRICS_TO_RECORD:
-                metrics['coldstarts'] += 1
-
-    if "makespan" in METRICS_TO_RECORD:
-        metrics['makespan'] += duration_ms
-
-    invocation_latency += duration_ms
-
-    deployed_on['recent_baseline_utilization'].add(response_timestamp,
-                                                   time_spent_on_cpu)  # TODO Check if this needs to run always
-
-    if run_on_fpga:
-        deployed_on['recent_fpga_usage_time'].add(response_timestamp,
-                                                  time_spent_on_fpga)  # TODO Check if this needs to run always
-
-        if "fpga_usage_per_node" in METRICS_TO_RECORD:
-            if metrics['fpga_usage_per_node'].get(deployed_on['id']) is None:
-                metrics['fpga_usage_per_node'][deployed_on['id']] = time_spent_on_fpga
-            else:
-                metrics['fpga_usage_per_node'][deployed_on['id']] += time_spent_on_fpga
-
-    # only trigger this if 30 seconds have passed to avoid recording way too many data points
-    if "metrics_per_node_over_time" in METRICS_TO_RECORD and (is_last_request or time_elapsed_since_previous_request(
-            60 * 30)):  # TODO Check if this arbitrary number is correct
-        fpga_reconfiguration_times = [node['recent_fpga_reconfiguration_time'].get_window_value() for
-                                      node in nodes.values()]
-        fpga_usage_times = [node['recent_fpga_usage_time'].get_window_value() for node in nodes.values()]
-        baseline_utilization_times = [node['recent_baseline_utilization'].get_window_value() for node in
-                                      nodes.values()]
-
-        metrics['metrics_per_node_over_time'].append({
-            'timestamp': arrival_timestamp,
-            'baseline_utilization_time': baseline_utilization_times,
-            'fpga_reconfiguration_time': fpga_reconfiguration_times,
-            'fpga_usage_time': fpga_usage_times,
-        })
-        previous_request_timestamp['start'] = arrival_timestamp
-        previous_request_timestamp['end'] = response_timestamp
-
-    # Immediately releasing means we have to coldstart for every request
-    # release_fpga_slot(functions, nodes, deployed_on, function, end_timestamp, ENABLE_LOGS)
-
-    if "latencies" in METRICS_TO_RECORD and (
-            ARRIVAL_POLICY != "PRIORITY" or (
-            not RECORD_PRIORITY_LATENCIES or (RECORD_PRIORITY_LATENCIES and priority))):
-        metrics['latencies'][req_id] = (
-            arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
-
-    return True
-
-
-def update_trackers(recently_used_nodes, end_timestamp, ENABLE_LOGS, row_is_traced: bool):
-    if row_is_traced:
-        newrelic.agent.add_custom_span_attribute("recently_used_nodes", len(recently_used_nodes))
-
-    # instead of decaying all nodes, decay nodes that have recent usage and reset after this
-    for node in recently_used_nodes.values():
-        node['recent_baseline_utilization'].decay(end_timestamp)
-
-        node['recent_fpga_usage_time'].decay(end_timestamp)
-        node['recent_fpga_reconfiguration_count'].decay(end_timestamp)
-        node['recent_fpga_reconfiguration_time'].decay(end_timestamp)
-
-    recently_used_nodes.clear()
+from process import process_row
+from util import create_node
 
 
 @newrelic.agent.function_trace()
@@ -646,7 +43,7 @@ def run_on_file(
         ACCELERATE_REQUESTS: float = 0
 ):
     if METRICS_TO_RECORD is None:
-        METRICS_TO_RECORD = {"coldstarts", "makespan", "request_duration",
+        METRICS_TO_RECORD = {"coldstarts", "request_duration",
                              "fpga_reconfigurations_per_node", "fpga_usage_per_node", "requests_per_node",
                              "request_duration_per_node", "function_placements_per_node", "metrics_per_node_over_time",
                              "latencies"}
@@ -689,7 +86,6 @@ def run_on_file(
 
         # metrics that can be disabled
         'coldstarts': 0,
-        'makespan': 0,
 
         'request_duration': 0,
 
@@ -817,6 +213,9 @@ def run_on_file(
         if res is False:
             break
 
+    # post-processing: compute makespan
+    metrics["makespan"] = compute_makespan(metrics['latencies'])
+
     if "coldstarts" not in METRICS_TO_RECORD:
         print(
             "Warning: coldstarts not recorded in metrics, coldstart_percent, time_spent_on_cold_starts will be incorrect")
@@ -852,3 +251,33 @@ def run_on_file(
     ])
 
     return nodes, functions, metrics, coldstart_percent, time_spent_on_cold_starts, time_spent_processing
+
+
+def compute_makespan(latencies: dict):
+    # Step 1: Extract and sort intervals
+    intervals = [
+        # (processing_start_timestamp, response_timestamp)
+        (data[1], data[2]) for data in latencies.values()
+    ]
+    intervals.sort(key=lambda x: x[0])
+
+    # Step 2: Merge intervals
+    merged_intervals = []
+    current_start, current_end = intervals[0]
+
+    for start, end in intervals[1:]:
+        if start <= current_end:  # Overlapping intervals
+            current_end = max(current_end, end)
+        else:  # Non-overlapping interval, push current interval to merged_intervals
+            merged_intervals.append((current_start, current_end))
+            current_start, current_end = start, end
+
+    # Add the last interval
+    merged_intervals.append((current_start, current_end))
+
+    # Step 3: Calculate makespan
+    makespan = sum((end - start).total_seconds() for start, end in merged_intervals)
+
+    makespan_ms = makespan * 1000
+
+    return makespan_ms
