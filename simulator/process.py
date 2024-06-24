@@ -135,6 +135,7 @@ def process_row(
         milliseconds=float(time_spent_on_cpu))  # TODO Check if this is far enough into the future
     deployed_on['cpu']['current_invocation'] = req_id
 
+    needs_reconfiguration = False
     if run_on_fpga:
         next_earliest_fpga = processing_start_timestamp + datetime.timedelta(
             milliseconds=float(time_spent_on_fpga))
