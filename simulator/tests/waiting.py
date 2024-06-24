@@ -58,6 +58,8 @@ class TestWaiting(TestCase):
 
         self.assertEqual(sum_delays, 71.0 * 1000)
 
+        # self.assertEqual(metrics["makespan"], 185080.0)
+
         # (arrival_timestamp, processing_start_timestamp, response_timestamp, invocation_latency, duration_ms, delay)
         self.assertEqual(metrics["latencies"], {'1-a-2021-01-31 01:00:00': (datetime.datetime(2021, 1, 31, 1, 0),
                                                                             datetime.datetime(2021, 1, 31, 1, 0),
@@ -111,27 +113,35 @@ class TestWaiting(TestCase):
         # create a gantt chart for the arrival, processing start, and response times of each request
         df_rows = []
 
+        dur_waiting = 0
+        dur_processing = 0
         for key in metrics["latencies"]:
             df = df_rows.append({
+                "State": "waiting",
                 "Task": key + "-arrival",
                 "Start": metrics["latencies"][key][0],
                 "Finish": metrics["latencies"][key][1],
                 "Resource": key.split("-")[1]
             })
+            dur_waiting += metrics["latencies"][key][5]
 
             df = df_rows.append({
+                "State": "processing",
                 "Task": key + "-processing",
                 "Start": metrics["latencies"][key][1],
                 "Finish": metrics["latencies"][key][2],
                 "Resource": key.split("-")[1]
             })
+            dur_processing += metrics["latencies"][key][4]
+
+        print(f"waiting for {dur_waiting}, processing for {dur_processing}")
 
         df = pd.DataFrame(
-            columns=["Task", "Start", "Finish", "Resource"],
+            columns=["State", "Task", "Start", "Finish", "Resource"],
             data=df_rows
         )
 
-        fig = px.timeline(df, x_start="Start", x_end="Finish", y="Resource", color="Resource")
+        fig = px.timeline(df, x_start="Start", x_end="Finish", y="Resource", color="State")
         fig.update_yaxes(categoryorder="total descending")
 
         fig.show()
@@ -491,6 +501,79 @@ class TestWaiting(TestCase):
         )
 
         fig = px.timeline(df, x_start="Start", x_end="Finish", y="Resource", color="Resource")
+        fig.update_yaxes(categoryorder="total descending")
+
+        fig.show()
+
+    def test_visualization(self):
+        nodes, functions, metrics, coldstart_percent, time_spent_on_cold_starts, time_spent_processing = run_on_file(
+            csv_file_path="../test-waiting.csv",
+            NUM_NODES=4,
+            NUM_FPGA_SLOTS_PER_NODE=1,
+            MAX_REQUESTS=0,
+            ENABLE_LOGS=True,
+            ENABLE_PRINT_RESULTS=True,
+            ARRIVAL_POLICY="FIFO",
+            FUNCTION_KEEPALIVE=60,
+            ENABLE_PROGRESS_LOGS=True,
+            CHARACTERIZED_FUNCTIONS={
+                "1": {
+                    "characterization": {
+                        "avg_req_duration": 50,
+                        "avg_req_per_sec": 1
+                    },
+                    "fpga_ratio": 0.5,
+                    "label": "f1",
+                    "mean_speedup": 1.25,
+                    "run_on_fpga": True
+                }
+            },
+            RECENT_FPGA_RECONFIGURATION_TIME_WEIGHT=1,
+            FPGA_RECONFIGURATION_TIME=10,
+            CHARACTERIZED_FUNCTIONS_LABEL="strat1",
+            FPGA_BITSTREAM_LOCALITY_WEIGHT=1,
+            FUNCTION_PLACEMENT_IS_COLDSTART=False,
+            RECENT_FPGA_USAGE_TIME_WEIGHT=1,
+            FUNCTION_HOST_COLDSTART_TIME_MS=0,
+            ACCELERATE_REQUESTS=1
+        )
+
+        sum_delays = 0
+        for key in metrics["latencies"]:
+            sum_delays += metrics["latencies"][key][5]
+
+        # create a gantt chart for the arrival, processing start, and response times of each request
+        df_rows = []
+
+        dur_waiting = 0
+        dur_processing = 0
+        for key in metrics["latencies"]:
+            df = df_rows.append({
+                "State": "waiting",
+                "Task": key + "-arrival",
+                "Start": metrics["latencies"][key][0],
+                "Finish": metrics["latencies"][key][1],
+                "Resource": key.split("-")[1]
+            })
+            dur_waiting += metrics["latencies"][key][5]
+
+            df = df_rows.append({
+                "State": "processing",
+                "Task": key + "-processing",
+                "Start": metrics["latencies"][key][1],
+                "Finish": metrics["latencies"][key][2],
+                "Resource": key.split("-")[1]
+            })
+            dur_processing += metrics["latencies"][key][4]
+
+        print(f"waiting for {dur_waiting}, processing for {dur_processing}")
+
+        df = pd.DataFrame(
+            columns=["State", "Task", "Start", "Finish", "Resource"],
+            data=df_rows
+        )
+
+        fig = px.timeline(df, x_start="Start", x_end="Finish", y="Resource", color="State")
         fig.update_yaxes(categoryorder="total descending")
 
         fig.show()

@@ -364,7 +364,7 @@ def process_row(
         return False
 
     # convert duration (seconds) to milliseconds
-    duration_ms = duration * 1000
+    duration_ms = round(duration * 1000, 2)
 
     # get original start timestamp
     arrival_timestamp = response_timestamp - datetime.timedelta(milliseconds=float(duration_ms))
@@ -374,7 +374,7 @@ def process_row(
 
     # adjust duration by expected acceleration
     if should_accelerate:
-        duration_ms = duration_ms / characterized_function["mean_speedup"]
+        duration_ms = round(duration_ms / characterized_function["mean_speedup"], 2)
 
     # compute adjusted end timestamp
     response_timestamp = arrival_timestamp + datetime.timedelta(milliseconds=float(duration_ms))
@@ -411,7 +411,7 @@ def process_row(
         processing_start_timestamp = global_timer["time"]  # start on earliest slot availability
         delay = (processing_start_timestamp - arrival_timestamp).total_seconds() * 1000
         if "makespan" in METRICS_TO_RECORD:
-            metrics['makespan'] += delay
+            metrics['makespan'] += 0  # delay
         invocation_latency += delay
         # adjust end timestamp to account for waiting time
         response_timestamp = processing_start_timestamp + datetime.timedelta(milliseconds=float(
@@ -480,7 +480,7 @@ def process_row(
     # update metrics
     if is_function_placement:
         # only count placement toward makespan and latency if it should be understood as cold start
-        if not FUNCTION_PLACEMENT_IS_COLDSTART:
+        if FUNCTION_PLACEMENT_IS_COLDSTART:
             if "makespan" in METRICS_TO_RECORD:
                 metrics['makespan'] += FUNCTION_HOST_COLDSTART_TIME_MS
             invocation_latency += FUNCTION_HOST_COLDSTART_TIME_MS
@@ -550,9 +550,9 @@ def process_row(
                 metrics['coldstarts'] += 1
 
     if "makespan" in METRICS_TO_RECORD:
-        metrics['makespan'] += round(time_spent_on_cpu + time_spent_on_fpga, 2)
+        metrics['makespan'] += duration_ms
 
-    invocation_latency += round(time_spent_on_cpu + time_spent_on_fpga, 2)
+    invocation_latency += duration_ms
 
     deployed_on['recent_baseline_utilization'].add(response_timestamp,
                                                    time_spent_on_cpu)  # TODO Check if this needs to run always
