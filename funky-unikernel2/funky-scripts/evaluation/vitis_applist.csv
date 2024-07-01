@@ -1,0 +1,19 @@
+array_partition, matmul.xclbin
+axi_burst_performance, -x1 ./test_kernel_maxi_256bit.xclbin -x2 ./test_kernel_maxi_512bit.xclbin
+bind_op_storage, vadd.xclbin
+burst_rw, vadd.xclbin
+critical_path, -x apply_watermark_GOOD.xclbin -i xilinx_img.bmp -c golden.bmp
+custom_datatype, -x rgb_to_hsv.xclbin -i xilinx_logo.bmp
+dataflow_stream, adder.xclbin
+dataflow_stream_array, N_stage_Adders.xclbin
+dependence_inter, vconv.xclbin
+kernel_chain, krnl_mmult.xclbin
+lmem_2rw, vadd.xclbin
+loop_pipeline, vector_addition.xclbin
+loop_reorder, mmult.xclbin
+partition_cyclicblock, matmul.xclbin
+port_width_widening, krnl_port_widen.xclbin
+shift_register, fir.xclbin
+simple_vadd, krnl_vadd.xclbin
+systolic_array, mmult.xclbin
+wide_mem_rw, vadd.xclbin

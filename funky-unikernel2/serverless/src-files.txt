@@ -1,0 +1,13 @@
+src/addmul-fpga.cpp
+src/aes128ecb-fpga.cpp
+src/corner-fpga.cpp
+src/gzip-fpga.cpp
+src/hls4ml-fpga.cpp
+src/hyperloglog-fpga.cpp
+src/matmul64-fpga.cpp
+src/nw-fpga.cpp
+src/sha3-fpga.cpp
+src/sha256-fpga.cpp
+src/gzip-then-aes-fpga.cpp
+src/md5x-fpga.cpp
+src/fft-fpga.cpp

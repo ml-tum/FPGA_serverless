@@ -1,0 +1,21 @@
+FROM funky/base as builder
+
+ARG BENCH
+
+RUN mkdir /root/binaries && cd "$(find /root/funky-unikernel/examples -name $BENCH)" && \
+	export INCLUDEOS_PREFIX=/root/includeos && \
+	export CC=clang-7 && \
+	export CXX=clang++-7 && \
+	./build.sh build && cp build/funkycl-app /root/binaries/$BENCH && cd .. && rm -rf build
+
+##RUN cd root/funky-unikernel/examples/Vitis_Accel_Examples/ && mkdir /root/binaries && \
+##	export INCLUDEOS_PREFIX=/root/includeos && \
+##	export CC=clang-7 && \
+##	export CXX=clang++-7 && \
+##	for d in */; do cd $d && ./build.sh build && f=${d/\//}; \
+##	cp build/funkycl-app /root/binaries/$f && cd ..; done
+
+FROM scratch as artifacts
+COPY --from=builder /root/funky-unikernel/build/precompiled/src/solo5_repo/ukvm/ukvm-bin .
+COPY --from=builder /root/binaries .
+

@@ -1,0 +1,236 @@
+#!/bin/sh
+# Copyright (c) 2015-2017 Contributors as noted in the AUTHORS file
+#
+# This file is part of ukvm, a unikernel monitor.
+#
+# Permission to use, copy, modify, and/or distribute this software
+# for any purpose with or without fee is hereby granted, provided
+# that the above copyright notice and this permission notice appear
+# in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+# WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+# AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR
+# CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+# OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+# NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+# CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+die ()
+{
+    echo "ukvm-configure: error: $@" 1>&2
+    exit 1
+}
+
+if [ "$#" -lt 1 ]; then
+    cat <<EOM 1<&2
+Usage: ukvm-configure SOURCEDIR [ MODULES ... ]
+
+Configures ukvm for your target, enabling the MODULES specified.
+
+Generates a Makefile.ukvm in the current directory. Use the "ukvm-bin" target
+to build ukvm.
+
+Options:
+    SOURCEDIR is the path to the ukvm source
+    MODULES can be any combination of: net blk gdb fpga
+
+To use a cross-compiler, set the UKVM_CC environment variable.
+To build ukvm statically, set the UKVM_STATIC environment variable.
+EOM
+    exit 1
+fi
+
+UKVM_CC=${UKVM_CC:-cc}
+UKVM_SRC=$(readlink -f $1)
+if [ ! -d ${UKVM_SRC} -o ! -f ${UKVM_SRC}/ukvm_core.c ]; then
+    die "Not a ukvm source directory: ${UKVM_SRC}"
+fi
+shift
+
+#TODO: make an error if ${XILINX_XRT} is not set
+
+add_cflags ()
+{
+    UKVM_CFLAGS="${UKVM_CFLAGS} $@"
+}
+
+add_obj ()
+{
+    for i in "$@"; do
+        UKVM_OBJS="${UKVM_OBJS} _build-ukvm/${i}"
+    done
+}
+
+add_header ()
+{
+    for i in "$@"; do
+        UKVM_HEADERS="${UKVM_HEADERS} ${UKVM_SRC}/${i}"
+    done
+}
+
+add_module ()
+{
+    if [ ! -f ${UKVM_SRC}/ukvm_module_$1.c ]; then
+        die "Invalid module: $1"
+    fi
+    
+    if [ "$1" = "fpga" ]; then
+      # OpenCL header is installed?
+      echo '#include <CL/cl2.hpp>' | g++ -c -xc++ - 2> /dev/null
+      if [ $? -gt 0 ]; then
+        echo "*****************************************************************"
+        echo "Opencl headers could not be found. fpga module will not get built"
+        echo "*****************************************************************"
+
+        return
+      fi
+      rm ./-.o
+
+      # XRT is installed?
+      if  [ -z "${XILINX_XRT}" ]; then
+        echo "*****************************************************************"
+        echo "Xilinx Runtime (XRT) could not be found. fpga module will not get built"
+        echo "*****************************************************************"
+
+        return
+      fi
+
+      # XRT OpenCL dependency is okay
+      ENABLE_FUNKY="yes"
+    fi 
+    
+    enableit="-DUKVM_MODULE_$(echo $1 | tr '[a-z]' '[A-Z]')"
+    add_obj "ukvm_module_$1.o"
+    add_cflags "${enableit}"
+}
+
+add_funky_obj ()
+{
+    for i in "$@"; do
+        FUNKY_OBJS="${FUNKY_OBJS} _build-funky/${i}"
+    done
+}
+
+add_funky_header ()
+{
+    for i in "$@"; do
+        FUNKY_HEADERS="${FUNKY_HEADERS} ${UKVM_SRC}/${i}"
+    done
+}
+
+UKVM_CPP=g++  # for linking obj files 
+
+UKVM_CFLAGS=
+UKVM_LDFLAGS="-pthread"
+UKVM_LDLIBS=
+
+UKVM_HEADERS=
+UKVM_OBJS=
+add_obj ukvm_core.o ukvm_elf.o ukvm_main.o
+add_header ukvm.h ukvm_guest.h ukvm_cc.h
+
+for module in "$@"; do
+    [ -z "${module}" ] && continue
+    add_module ${module}
+done
+
+if [ "${ENABLE_FUNKY}" = "yes" ]; then
+  UKVM_LDLIBS="-L${XILINX_XRT}/lib -lOpenCL -lpthread -lrt -lstdc++" # for Funky backend
+
+  FUNKY_CPP=${UKVM_CPP}  # for compiling Funky codes
+  FUNKY_OBJS=
+  FUNKY_HEADERS=
+  FUNKY_CPPFLAGS="-Wall -O0 -g -std=c++17"
+  FUNKY_INCLUDES="-I${XILINX_XRT}/include"
+  add_funky_obj funky_backend_core.o funky_xcl2.o
+  add_funky_header funky_backend_core.h funky_xcl2.hpp
+else
+  # FUNKY_HEADERS=dummy-header/funky_backend_core.h
+  # UKVM_INCLUDES=-I${UKVM_SRC}/dummy-header
+
+  FUNKY_CPP=${UKVM_CPP} 
+  FUNKY_CPPFLAGS="-Wall -O0 -g -std=c++17"
+  add_funky_obj funky_backend_core_dummy.o
+  add_funky_header funky_backend_core.h
+fi
+
+
+[ -n "${UKVM_STATIC}" ] && UKVM_LDFLAGS="-static"
+
+TARGET=$(${UKVM_CC} -dumpmachine)
+[ $? -ne 0 ] &&
+    die "Error running '${UKVM_CC} -dumpmachine', is your compiler working?"
+case ${TARGET} in
+    x86_64-*linux*)
+        add_obj ukvm_hv_kvm.o ukvm_hv_kvm_x86_64.o ukvm_cpu_x86_64.o ukvm_monitor.o
+        add_header ukvm_hv_kvm.h ukvm_cpu_x86_64.h
+        ;;
+    x86_64-*freebsd1[12]*)
+        add_obj ukvm_hv_freebsd.o ukvm_hv_freebsd_x86_64.o ukvm_cpu_x86_64.o
+        add_header ukvm_hv_freebsd.h ukvm_cpu_x86_64.h
+        ;;
+    amd64-*-openbsd6.[3-9])
+        add_obj ukvm_hv_openbsd.o ukvm_hv_openbsd_x86_64.o ukvm_cpu_x86_64.o
+        add_header ukvm_hv_openbsd.h ukvm_cpu_x86_64.h
+        ;;
+    aarch64-*linux*)
+        add_obj ukvm_hv_kvm.o ukvm_hv_kvm_aarch64.o ukvm_cpu_aarch64.o
+        add_header ukvm_hv_kvm.h ukvm_cpu_aarch64.h
+        ;;
+    *)
+        die "Unsupported compiler target: ${TARGET}"
+        ;;
+esac
+
+add_obj ukvm_serverless.o
+
+cat <<EOF> Makefile.ukvm
+# Generated by 'ukvm-configure $@'
+# Using compiler '${UKVM_CC}', target '${TARGET}'
+
+.BEGIN: ; @echo -e Warning: \$(MAKEFILE) requires GNU make.\\\\nWarning: Attempting to build with \"gmake -f \$(MAKEFILE) \$(.TARGETS)\" for you now. && gmake -f \$(MAKEFILE) \$(.TARGETS)
+
+.PHONY: all
+all: ukvm-bin
+
+UKVM_CC=${UKVM_CC}
+UKVM_CFLAGS=-Wall -Werror -std=c99 -O2 -g ${UKVM_CFLAGS}
+UKVM_LDFLAGS=${UKVM_LDFLAGS}
+UKVM_LDLIBS=${UKVM_LDLIBS}
+UKVM_CPP=${UKVM_CPP}
+
+UKVM_OBJS=${UKVM_OBJS}
+UKVM_HEADERS=${UKVM_HEADERS}
+
+FUNKY_CPP=${FUNKY_CPP}
+FUNKY_CPPFLAGS=${FUNKY_CPPFLAGS}
+FUNKY_INCLUDES=${FUNKY_INCLUDES}
+
+FUNKY_OBJS=${FUNKY_OBJS}
+FUNKY_HEADERS=${FUNKY_HEADERS}
+
+\$(UKVM_OBJS) \$(FUNKY_OBJS): \$(UKVM_HEADERS) \$(FUNKY_HEADERS)
+
+_build-ukvm:
+	mkdir -p _build-ukvm
+
+_build-funky:
+	mkdir -p _build-funky
+
+_build-ukvm/ukvm_%.o: ${UKVM_SRC}/ukvm_%.c \$(MAKEFILE_LIST) | _build-ukvm
+	\$(UKVM_CC) \$(UKVM_CFLAGS) \$(FUNKY_MACROS) -c \$< -o \$@
+
+_build-funky/funky_%.o: ${UKVM_SRC}/funky_%.cpp \$(MAKEFILE_LIST) | _build-funky
+	\$(FUNKY_CPP) \$(FUNKY_CPPFLAGS) \$(FUNKY_MACROS) \$(FUNKY_INCLUDES) -c $< -o \$@
+
+ukvm-bin: \$(UKVM_OBJS) \$(FUNKY_OBJS) \$(MAKEFILE_LIST)
+	\$(UKVM_CPP) \$(UKVM_LDFLAGS) -o \$@ \$(UKVM_OBJS) \$(FUNKY_OBJS) \$(UKVM_LDLIBS)
+
+.PHONY: ukvm-clean
+ukvm-clean:
+	rm -rf _build-ukvm
+	rm -rf _build-funky
+	rm -f ukvm-bin
+EOF

@@ -1,0 +1,1 @@
+../../funky-scripts/examples/build.sh

@@ -1,0 +1,4 @@
+3d-rendering, -f rendering.xclbin
+digit-recognition, -f DigitRec.hw.xclbin
+optical-flow, -f optical_flow.hw.xclbin -p sintel_alley -o outputs.flo
+spam-filter, -f SgdLR.hw.xclbin -p data/
