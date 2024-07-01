@@ -9,8 +9,11 @@ RUN chmod +x /usr/bin/fwatchdog
 
 # Install packages
 RUN apk upgrade --update-cache --available && \
-    apk add g++ openssl openssl-dev && \
+    apk add g++ fftw-dev && \
     rm -rf /var/cache/apk/*
+#RUN apk upgrade --update-cache --available && \
+#    apk add g++ opencv opencv-dbg libopencv_core && \
+#    rm -rf /var/cache/apk/*
 
 # Add non root user
 RUN addgroup -S app && adduser app -S -G app
@@ -21,11 +24,9 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-#ENV fprocess="openssl dgst -sha3-512"
-COPY sha3.cpp util.h .
-RUN g++ -std=c++17 -O3 -march=native -o sha3 sha3.cpp -lssl -lcrypto
-ENV fprocess="/home/app/sha3"
-
+COPY fft.cpp util.h .
+RUN g++ -std=c++17 -O3 -march=native -o fft fft.cpp -lfftw3f -lm
+ENV fprocess="/home/app/fft"
 # Set to true to see request in function logs
 ENV write_debug="true"
 

@@ -21,8 +21,9 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-COPY gzip.cpp .
-RUN /bin/sh -c g++ -O3 -march=native -o gzip gzip.cpp -lboost_iostreams 
+COPY gzip.cpp util.h .
+#RUN /bin/sh -c g++ -O3 -march=native -o gzip gzip.cpp -lboost_iostreams 
+RUN g++ -std=c++17 -O3 -march=native -o gzip gzip.cpp -lz
 ENV fprocess=/home/app/gzip
 # Set to true to see request in function logs
 ENV write_debug="true"

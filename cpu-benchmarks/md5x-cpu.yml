@@ -1,0 +1,10 @@
+version: 1.0
+provider:
+  name: openfaas
+  gateway: http://127.0.0.1:8080
+functions:
+  md5x-cpu:
+    lang: dockerfile
+    handler: ./md5x-cpu
+    image: docker.io/ccgroup47/myrepo:md5x-cpu
+

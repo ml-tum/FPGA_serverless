@@ -23,7 +23,7 @@ USER app
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
 #ENV fprocess="sha256sum"
 COPY sha256.cpp util.h .
-RUN g++ -O3 -march=native -o sha256 sha256.cpp -lssl -lcrypto
+RUN g++ -std=c++17 -O3 -march=native -o sha256 sha256.cpp -lssl -lcrypto
 ENV fprocess="/home/app/sha256"
 
 # Set to true to see request in function logs

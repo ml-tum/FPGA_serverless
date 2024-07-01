@@ -1,11 +1,13 @@
 import numpy as np
 import tensorflow as tf
+import time
 from tensorflow.keras import backend as K
 from tensorflow.keras.models import load_model
 from qkeras.utils import _add_supported_quantized_objects
 from tensorflow_model_optimization.sparsity.keras import strip_pruning
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
 from os.path import exists
+from pathlib import Path
 
 co = {}
 _add_supported_quantized_objects(co)
@@ -21,19 +23,38 @@ elif exists(ctr_path):
 else:
     raise RuntimeError("model not found");
 
+start_time = 0
+end_time = 0
+
+def measure_start():
+  global start_time
+  start_time = time.perf_counter_ns()
+
+def measure_end():
+  global end_time
+  end_time = time.perf_counter_ns()
 
 def handle(event, context):
     data = event.body
     results = handle_request(data)
+
+    csvPath = str(Path.home()) + "/computation_time/log.csv"
+    if exists(csvPath):
+        with open(csvPath, "a") as csv:
+            csv.write("hls4ml, cpu, %d, %d\n" % (len(data), diff))
+
     return {
         "statusCode": 200,
-        "body": results
+        "body": "results",
+        "headers": {
+            "X-computation-time": str(end_time-start_time) + " ns"
+        }
     }
 
 def noop():
     pass
 
-def handle_request(data, measure_start=noop, measure_end=noop):
+def handle_request(data):
     delimiter = data.find(b'\n')
     count = int(data[0:delimiter])
     binary = data[delimiter+1:]

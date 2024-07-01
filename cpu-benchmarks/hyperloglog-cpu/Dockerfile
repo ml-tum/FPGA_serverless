@@ -21,8 +21,8 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-COPY bitmap.c bitmap.h hll.c hll.h hll_constants.c hll_constants.h MurmurHash3.cpp MurmurHash3.h hyperloglog-cpu.c .
-RUN gcc -O3 -march=native -o hyperloglog hyperloglog-cpu.c hll.c hll_constants.c bitmap.c MurmurHash3.cpp -lm
+COPY bitmap.c bitmap.h hll.c hll.h hll_constants.c hll_constants.h MurmurHash3.cpp MurmurHash3.h hyperloglog-cpu.cpp util.h .
+RUN g++ -std=c++17 -O3 -march=native -fpermissive -o hyperloglog hyperloglog-cpu.cpp hll.c hll_constants.c bitmap.c MurmurHash3.cpp -lm
 ENV fprocess="/home/app/hyperloglog"
 # Set to true to see request in function logs
 ENV write_debug="false"

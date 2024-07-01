@@ -1,4 +1,0 @@
-Index	Image_fetch	Env_setup	VMM_setup	OS_setup
-Docker	1065.94	542.9	0	0
-Kata-containers	1065.94	801.5	49.46	880.14
-Funky	925.88	801.5	25.8	41.7

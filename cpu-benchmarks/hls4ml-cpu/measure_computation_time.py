@@ -25,5 +25,5 @@ diff = end_time-start_time
 
 print(f"Elapsed time: {diff} ns", file=sys.stderr)
 
-with open(str(Path.home()) + "/output/benchmark.csv", "a") as csv:
+with open(str(Path.home()) + "/computation_time/log.csv", "a") as csv:
     csv.write("hls4ml, cpu, %d, %d\n" % (len(data), diff))

@@ -34,25 +34,26 @@ void compute_word(int ctr) {
     }
 }
 
-int main() {
+void func(std::string_view &input, std::stringstream &output)
+{
+	std::stringstream stst;
+	stst<<input;
 
-	std::string input;
-	std::cin>>input;
-	assert(input.size()==HASHLEN*2); //hexadecimal
+	std::string inputStr;
+	stst>>inputStr;
+
+	assert(inputStr.size()==HASHLEN*2); //hexadecimal
 
 	char needle[HASHLEN];
 	for(int i=0; i<HASHLEN; i++) {
 		char byt[3];
-        byt[0] = input[2*i];
-        byt[1] = input[2*i+1];
+        byt[0] = inputStr[2*i];
+        byt[1] = inputStr[2*i+1];
         byt[2] = '\0';
 		needle[i] = strtol(byt, NULL, 16);
 	}
 
-
 	int ctr = 0;
-
-	measure_start();
 	for(int c=0; c<MAX_ITERATIONS; c++) {
 		compute_word(c);
 		compute_md5();
@@ -61,12 +62,7 @@ int main() {
 		if(strncmp((char*)hash, needle, WORDLEN)==0) {
 			break;
 		}
-	}	
-	measure_end();
+	}
 
-	printf("Result: %s\n", word);
-    
-	measure_write("md5", "cpu", WORDLEN);
-
-	return 0;
+	output<<"Result: "<<word<<", iterations: "<<ctr<<std::endl;
 }

@@ -21,9 +21,9 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-COPY matmul.cpp .
-RUN g++ -O3 -march=native -o matmul matmul.cpp
-ENV fprocess="/home/app/matmul"
+COPY matmul64.cpp util.h .
+RUN g++ -std=c++17 -O3 -march=native -o matmul64 matmul64.cpp
+ENV fprocess="/home/app/matmul64"
 # Set to true to see request in function logs
 ENV write_debug="true"
 

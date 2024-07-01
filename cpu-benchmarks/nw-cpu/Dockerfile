@@ -21,8 +21,8 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-COPY nw.cpp .
-RUN g++ -O3 -march=native -std=c++17 -o nw nw.cpp
+COPY nw.cpp util.h .
+RUN g++ -std=c++17 -O3 -march=native -o nw nw.cpp
 ENV fprocess="/home/app/nw"
 # Set to true to see request in function logs
 ENV write_debug="true"

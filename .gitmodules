@@ -4,12 +4,6 @@
 [submodule "funky-unikernel"]
 	path = funky-unikernel
 	url = git@github.com:TUM-DSE/funky-unikernel.git
-[submodule "kata_urunc"]
-	path = kata_urunc
-	url = git@github.com:TUM-DSE/FPGA-uruntime.git
-[submodule "fpga-kubernetes"]
-	path = fpga-kubernetes
-	url = https://github.com/TUM-DSE/fpga-kubernetes/
 [submodule "Coyote"]
 	path = Coyote
 	url = git@github.com:TUM-DSE/Coyote.git

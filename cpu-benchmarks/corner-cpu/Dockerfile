@@ -24,8 +24,8 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-COPY corner.cpp .
-RUN g++ -O3 -march=native -o corner corner.cpp -I/usr/include/opencv4 -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
+COPY corner.cpp util.h .
+RUN g++ -std=c++17 -O3 -march=native -o corner corner.cpp -I/usr/include/opencv4 -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
 ENV fprocess="/home/app/corner"
 # Set to true to see request in function logs
 ENV write_debug="true"

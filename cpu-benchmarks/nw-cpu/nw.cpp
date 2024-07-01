@@ -2,7 +2,7 @@
 #include <thread>
 #include <sstream>
 #include <array>
-#include "../util/util.h"
+#include "util.h"
 using namespace std;
 
 using uint128_t = unsigned __int128;
@@ -30,20 +30,12 @@ int needleman_wunsch(array<char,SIZE> a, array<char,SIZE> b) {
     return dp[SIZE][SIZE];
 }
 
-
-char buffer[1024*1024*128];
-
-int main() {
-
-//	freopen(nullptr, "rb", stdin);
-	size_t inputsize = std::fread(buffer, 1, sizeof buffer, stdin);
-
-	string_view input(buffer, inputsize);
-
+void func(std::string_view &input, std::stringstream &output)
+{
 	size_t delimiter = input.find('\n');
 	if(delimiter == input.npos) {
 		cout<<"Bad request: Invalid format"<<endl;
-		return 1;
+		return;
 	}
 
 	stringstream stst;
@@ -52,22 +44,22 @@ int main() {
 	uint16_t s0_words, s1_words;
 	string s0, s1;
 	if(!(stst>>s0_words>>s1_words)) {
-		cout<<"Bad request: Invalid format"<<endl;
-		return 1;
+		output<<"Bad request: Invalid format"<<endl;
+		return;
 	}
 
 	// Not sure, if this is strictly necessary
 	if(__builtin_popcount(s0_words)!=1 || __builtin_popcount(s1_words)!=1) {
-		cout<<"Bad request: Not power of 2 lengths"<<endl;
-		return 1;
+		output<<"Bad request: Not power of 2 lengths"<<endl;
+		return;
 	}
 
 	const int bytes_per_word = 64;
 	int binary_bytes = ((int)input.size())-delimiter-1;
 
 	if(binary_bytes < s0_words*bytes_per_word + s1_words*bytes_per_word) {
-		cout<<"Bad request: Binary section only "<<binary_bytes<<" bytes long"<<endl;
-		return 1;
+		output<<"Bad request: Binary section only "<<binary_bytes<<" bytes long"<<endl;
+		return;
 	}
 
 
@@ -75,22 +67,17 @@ int main() {
 	uint8_t *s1_binary = (uint8_t*)(s0_binary+s0_words*64);
 
 	for(int i=0; i<s0_words*4; i++) {
-    		for(int j=0; j<s1_words*4; j++) {
+		for(int j=0; j<s1_words*4; j++) {
 
-    			array<char,64> s0;
-	    		array<char,64> s1;
-    			for(int k=0; k<16; k++) {
-    				tie(s0[k*4],s0[k*4+1],s0[k*4+2],s0[k*4+3]) = convert_byte(*(s0_binary+i*16+k));
-    				tie(s1[k*4],s1[k*4+1],s1[k*4+2],s1[k*4+3]) = convert_byte(*(s1_binary+j*16+k));
-	    		}
-			measure_start();
-    			int score = needleman_wunsch(s0, s1);
-			measure_end();
-    			char space = j<s1_words*4-1 ? ' ' : '\n';
-	    		cout<<score<<space;
+			array<char,64> s0;
+    		array<char,64> s1;
+			for(int k=0; k<16; k++) {
+				tie(s0[k*4],s0[k*4+1],s0[k*4+2],s0[k*4+3]) = convert_byte(*(s0_binary+i*16+k));
+				tie(s1[k*4],s1[k*4+1],s1[k*4+2],s1[k*4+3]) = convert_byte(*(s1_binary+j*16+k));
     		}
+			int score = needleman_wunsch(s0, s1);
+			char space = j<s1_words*4-1 ? ' ' : '\n';
+    		output<<score<<space;
+		}
 	}
-	measure_write("nw", "cpu", binary_bytes);
-
-	return 0;
 }

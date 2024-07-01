@@ -9,7 +9,7 @@ RUN chmod +x /usr/bin/fwatchdog
 
 # Install packages
 RUN apk upgrade --update-cache --available && \
-    apk add g++ openssl openssl-dev && \
+    apk add openssl openssl-dev g++ && \
     rm -rf /var/cache/apk/*
 
 # Add non root user
@@ -21,11 +21,9 @@ WORKDIR /home/app
 USER app
 
 # Populate example here - i.e. "cat", "sha512sum" or "node index.js"
-#ENV fprocess="openssl dgst -sha3-512"
-COPY sha3.cpp util.h .
-RUN g++ -std=c++17 -O3 -march=native -o sha3 sha3.cpp -lssl -lcrypto
-ENV fprocess="/home/app/sha3"
-
+COPY md5x.cpp util.h .
+RUN g++ -std=c++17 -O3 -march=native -o md5x md5x.cpp -lcrypto
+ENV fprocess="/home/app/md5x"
 # Set to true to see request in function logs
 ENV write_debug="true"
 
